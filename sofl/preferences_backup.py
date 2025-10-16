@@ -651,36 +651,29 @@ class SOFLPreferences(Adw.PreferencesDialog):
         if hasattr(self, 'proton_manager_instance'):
             return self.proton_manager_instance.get_installed_versions()
         
-        # Fallback method - use same logic as ProtonManager
-        home = Path.home()
-        steam_paths = [
-            home / ".local/share/Steam/compatibilitytools.d",
-            home / ".steam/root/compatibilitytools.d",
-            home / ".steam/steam/compatibilitytools.d"
-        ]
-        
+        # Fallback method
+        proton_path = Path(
+            os.path.expanduser("~/.local/share/Steam/compatibilitytools.d")
+        )
         versions = []
-        
-        # Check all possible paths
-        for proton_path in steam_paths:
-            if proton_path.exists() and proton_path.is_dir():
-                try:
-                    for item in proton_path.iterdir():
-                        if item.is_dir() and (
-                            item.name.startswith("GE-Proton") or 
-                            item.name.startswith("Proton")
-                        ):
-                            # Check if it's a valid Proton installation
-                            proton_script = item / "proton"
-                            if proton_script.exists() and proton_script.is_file():
-                                versions.append(item.name)
-                except Exception as e:
-                    logging.error(f"[Preferences] Error reading {proton_path}: {e}")
-        
-        # Remove duplicates and sort
-        versions = list(set(versions))
+
+        # Default versions if no others found
+        default_versions = ["GE-Proton10-3", "GE-Proton9-26", "Proton-8.0"]
+
+        if proton_path.exists() and proton_path.is_dir():
+            for item in proton_path.iterdir():
+                if item.is_dir() and (
+                    item.name.startswith("GE-Proton") or item.name.startswith("Proton")
+                ):
+                    versions.append(item.name)
+
+        # If no versions found, add defaults
+        if not versions:
+            versions = default_versions
+
+        # Sort versions
         versions.sort(reverse=True)
-        
+
         return versions
 
     def on_auto_patch_changed(self, switch: Adw.SwitchRow, _param: Any) -> None:
@@ -730,7 +723,6 @@ class SOFLPreferences(Adw.PreferencesDialog):
         # Store references to current children for proper cleanup
         self.proton_installed_children = []
         self.proton_available_children = []
-        self.proton_loading_spinner = None
 
     def refresh_proton_versions(self) -> None:
         """Refresh both installed and available Proton versions"""
@@ -744,29 +736,60 @@ class SOFLPreferences(Adw.PreferencesDialog):
             installed_versions = self.proton_manager_instance.get_installed_versions()
             logging.info(f"[Preferences] Found {len(installed_versions)} installed versions: {installed_versions}")
             
-            # Clear existing children from installed accordion
+            # Clear existing children from installed group
             for child in self.proton_installed_children:
-                self.proton_installed_expander.remove(child)
+                self.proton_installed_group.remove(child)
             self.proton_installed_children.clear()
             
             if not installed_versions:
-                # Show simple empty state
-                empty_label = Gtk.Label()
-                empty_label.set_text(_("No Proton versions installed"))
-                empty_label.set_css_classes(["dim-label"])
-                empty_label.set_margin_top(12)
-                empty_label.set_margin_bottom(12)
-                empty_label.set_margin_start(12)
-                empty_label.set_margin_end(12)
+                # Show beautiful empty state with accordion-style design
+                empty_expander = Adw.ExpanderRow()
+                empty_expander.set_title(_("No Proton Versions Installed"))
+                empty_expander.set_subtitle(_("Download a version to get started"))
+                empty_expander.set_expanded(True)  # Always expanded for empty state
                 
-                self.proton_installed_expander.add_row(empty_label)
-                self.proton_installed_children.append(empty_label)
+                # Empty state icon
+                empty_icon = Gtk.Image()
+                empty_icon.set_from_icon_name("package-x-generic-symbolic")
+                empty_icon.set_pixel_size(24)
+                empty_expander.add_prefix(empty_icon)
+                
+                # Create content for empty state
+                empty_content = Gtk.Box()
+                empty_content.set_orientation(Gtk.Orientation.VERTICAL)
+                empty_content.set_spacing(16)
+                empty_content.set_margin_top(12)
+                empty_content.set_margin_bottom(12)
+                empty_content.set_margin_start(12)
+                empty_content.set_margin_end(12)
+                
+                # Description
+                desc_label = Gtk.Label()
+                desc_label.set_text(_("You haven't downloaded any GE-Proton versions yet. Download a version from the list below to enable Steam compatibility for your games."))
+                desc_label.set_wrap(True)
+                desc_label.set_halign(Gtk.Align.START)
+                desc_label.set_css_classes(["dim-label"])
+                empty_content.append(desc_label)
+                
+                # Action button
+                action_button = Gtk.Button()
+                action_button.set_label(_("View Available Versions"))
+                action_button.set_icon_name("go-down-symbolic")
+                action_button.set_css_classes(["suggested-action", "pill"])
+                action_button.set_halign(Gtk.Align.START)
+                action_button.connect("clicked", self.scroll_to_available_versions)
+                empty_content.append(action_button)
+                
+                empty_expander.add_row(empty_content)
+                
+                self.proton_installed_group.add(empty_expander)
+                self.proton_installed_children.append(empty_expander)
                 return
             
             # Add each installed version
             for version in installed_versions:
                 row = self.create_installed_version_row(version)
-                self.proton_installed_expander.add_row(row)
+                self.proton_installed_group.add(row)
                 self.proton_installed_children.append(row)
                 
         except Exception as e:
@@ -777,34 +800,39 @@ class SOFLPreferences(Adw.PreferencesDialog):
         try:
             logging.info("[Preferences] Refreshing available Proton versions...")
             
-            # Clear existing children from available accordion
+            # Clear existing children from available group
             for child in self.proton_available_children:
-                self.proton_available_expander.remove(child)
+                self.proton_available_group.remove(child)
             self.proton_available_children.clear()
             
-            # Show simple loading state
-            loading_box = Gtk.Box()
-            loading_box.set_orientation(Gtk.Orientation.HORIZONTAL)
-            loading_box.set_spacing(12)
-            loading_box.set_margin_top(12)
-            loading_box.set_margin_bottom(12)
-            loading_box.set_margin_start(12)
-            loading_box.set_margin_end(12)
+            # Show beautiful loading state
+            loading_page = Adw.StatusPage()
+            loading_page.set_title(_("Loading Proton Versions"))
+            loading_page.set_description(_("Fetching the latest GE-Proton releases from GitHub..."))
+            loading_page.set_icon_name("system-software-update-symbolic")
+            
+            # Add a progress indicator
+            progress_box = Gtk.Box()
+            progress_box.set_orientation(Gtk.Orientation.VERTICAL)
+            progress_box.set_spacing(12)
+            progress_box.set_halign(Gtk.Align.CENTER)
+            progress_box.set_margin_top(16)
             
             # Spinner
             spinner = Gtk.Spinner()
             spinner.start()
-            self.proton_loading_spinner = spinner  # Save reference to stop later
-            loading_box.append(spinner)
+            progress_box.append(spinner)
             
-            # Loading label
-            loading_label = Gtk.Label()
-            loading_label.set_text(_("Loading available versions..."))
-            loading_label.set_css_classes(["dim-label"])
-            loading_box.append(loading_label)
+            # Progress label
+            progress_label = Gtk.Label()
+            progress_label.set_text(_("Please wait..."))
+            progress_label.set_css_classes(["dim-label"])
+            progress_box.append(progress_label)
             
-            self.proton_available_expander.add_row(loading_box)
-            self.proton_available_children.append(loading_box)
+            loading_page.set_child(progress_box)
+            
+            self.proton_available_group.add(loading_page)
+            self.proton_available_children.append(loading_page)
             
             # Fetch available versions in a separate thread
             def fetch_versions():
@@ -830,35 +858,61 @@ class SOFLPreferences(Adw.PreferencesDialog):
         try:
             logging.info(f"[Preferences] Handling {len(versions)} loaded versions")
             
-            # Stop the loading spinner
-            if self.proton_loading_spinner:
-                self.proton_loading_spinner.stop()
-                self.proton_loading_spinner = None
-            
-            # Clear existing children from available accordion
+            # Clear existing children from available group
             for child in self.proton_available_children:
-                self.proton_available_expander.remove(child)
+                self.proton_available_group.remove(child)
             self.proton_available_children.clear()
             
             if not versions:
-                # Show simple empty state
-                empty_label = Gtk.Label()
-                empty_label.set_text(_("No versions available"))
-                empty_label.set_css_classes(["dim-label"])
-                empty_label.set_margin_top(12)
-                empty_label.set_margin_bottom(12)
-                empty_label.set_margin_start(12)
-                empty_label.set_margin_end(12)
+                # Show empty state with accordion-style design
+                empty_expander = Adw.ExpanderRow()
+                empty_expander.set_title(_("No versions available"))
+                empty_expander.set_subtitle(_("Check your internet connection"))
+                empty_expander.set_expanded(True)  # Always expanded for empty state
                 
-                self.proton_available_expander.add_row(empty_label)
-                self.proton_available_children.append(empty_label)
+                # Empty state icon
+                empty_icon = Gtk.Image()
+                empty_icon.set_from_icon_name("network-error-symbolic")
+                empty_icon.set_pixel_size(24)
+                empty_expander.add_prefix(empty_icon)
+                
+                # Create content for empty state
+                empty_content = Gtk.Box()
+                empty_content.set_orientation(Gtk.Orientation.VERTICAL)
+                empty_content.set_spacing(16)
+                empty_content.set_margin_top(12)
+                empty_content.set_margin_bottom(12)
+                empty_content.set_margin_start(12)
+                empty_content.set_margin_end(12)
+                
+                # Description
+                desc_label = Gtk.Label()
+                desc_label.set_text(_("Unable to load available Proton versions. Please check your internet connection and try again."))
+                desc_label.set_wrap(True)
+                desc_label.set_halign(Gtk.Align.START)
+                desc_label.set_css_classes(["dim-label"])
+                empty_content.append(desc_label)
+                
+                # Retry button
+                retry_button = Gtk.Button()
+                retry_button.set_label(_("Retry"))
+                retry_button.set_icon_name("view-refresh-symbolic")
+                retry_button.set_css_classes(["suggested-action", "pill"])
+                retry_button.set_halign(Gtk.Align.START)
+                retry_button.connect("clicked", self.on_proton_retry_clicked)
+                empty_content.append(retry_button)
+                
+                empty_expander.add_row(empty_content)
+                
+                self.proton_available_group.add(empty_expander)
+                self.proton_available_children.append(empty_expander)
                 return
             
             # Add each available version
             for version_info in versions:
                 logging.info(f"[Preferences] Creating row for version: {version_info.get('tag_name', 'unknown')}")
                 row = self.create_available_version_row(version_info)
-                self.proton_available_expander.add_row(row)
+                self.proton_available_group.add(row)
                 self.proton_available_children.append(row)
                 
         except Exception as e:
@@ -867,66 +921,111 @@ class SOFLPreferences(Adw.PreferencesDialog):
     def on_available_versions_error(self, error: str) -> None:
         """Handle error loading available versions"""
         try:
-            # Stop the loading spinner
-            if self.proton_loading_spinner:
-                self.proton_loading_spinner.stop()
-                self.proton_loading_spinner = None
-            
-            # Clear existing children from available accordion
+            # Clear existing children from available group
             for child in self.proton_available_children:
-                self.proton_available_expander.remove(child)
+                self.proton_available_group.remove(child)
             self.proton_available_children.clear()
             
-            # Show simple error state
-            error_box = Gtk.Box()
-            error_box.set_orientation(Gtk.Orientation.HORIZONTAL)
-            error_box.set_spacing(12)
-            error_box.set_margin_top(12)
-            error_box.set_margin_bottom(12)
-            error_box.set_margin_start(12)
-            error_box.set_margin_end(12)
+            # Show error state with accordion-style design
+            error_expander = Adw.ExpanderRow()
+            error_expander.set_title(_("Failed to load versions"))
+            error_expander.set_subtitle(_("Check your internet connection and try again"))
+            error_expander.set_expanded(True)  # Always expanded for error state
             
-            # Error icon
+            # Error state icon
             error_icon = Gtk.Image()
             error_icon.set_from_icon_name("network-error-symbolic")
-            error_icon.set_pixel_size(16)
-            error_box.append(error_icon)
+            error_icon.set_pixel_size(24)
+            error_expander.add_prefix(error_icon)
             
-            # Error label
-            error_label = Gtk.Label()
-            error_label.set_text(_("Failed to load versions. Check your internet connection."))
-            error_label.set_css_classes(["dim-label"])
-            error_box.append(error_label)
+            # Create content for error state
+            error_content = Gtk.Box()
+            error_content.set_orientation(Gtk.Orientation.VERTICAL)
+            error_content.set_spacing(16)
+            error_content.set_margin_top(12)
+            error_content.set_margin_bottom(12)
+            error_content.set_margin_start(12)
+            error_content.set_margin_end(12)
+            
+            # Error description
+            error_desc = Gtk.Label()
+            error_desc.set_text(_("An error occurred while loading available Proton versions. This might be due to network issues or GitHub API limitations."))
+            error_desc.set_wrap(True)
+            error_desc.set_halign(Gtk.Align.START)
+            error_desc.set_css_classes(["dim-label"])
+            error_content.append(error_desc)
             
             # Retry button
             retry_button = Gtk.Button()
+            retry_button.set_label(_("Retry"))
             retry_button.set_icon_name("view-refresh-symbolic")
-            retry_button.set_tooltip_text(_("Retry"))
-            retry_button.set_css_classes(["circular"])
+            retry_button.set_css_classes(["suggested-action", "pill"])
+            retry_button.set_halign(Gtk.Align.START)
             retry_button.connect("clicked", self.on_proton_retry_clicked)
-            error_box.append(retry_button)
+            error_content.append(retry_button)
             
-            self.proton_available_expander.add_row(error_box)
-            self.proton_available_children.append(error_box)
+            error_expander.add_row(error_content)
+            
+            self.proton_available_group.add(error_expander)
+            self.proton_available_children.append(error_expander)
             
         except Exception as e:
             logging.error(f"[Preferences] Error handling version load error: {e}")
 
-    def create_installed_version_row(self, version: str) -> Adw.ActionRow:
-        """Create a simple row for an installed Proton version"""
-        row = Adw.ActionRow()
-        row.set_title(version)
-        row.set_subtitle(_("Installed"))
+    def create_installed_version_row(self, version: str) -> Adw.ExpanderRow:
+        """Create a beautiful accordion row for an installed Proton version"""
+        expander = Adw.ExpanderRow()
+        expander.set_title(version)
+        expander.set_subtitle(_("Installed and ready to use"))
         
-        # Delete button
+        # Create a status indicator
+        status_box = Gtk.Box()
+        status_box.set_orientation(Gtk.Orientation.HORIZONTAL)
+        status_box.set_spacing(8)
+        
+        # Status icon
+        status_icon = Gtk.Image()
+        status_icon.set_from_icon_name("emblem-ok-symbolic")
+        status_icon.set_pixel_size(16)
+        status_box.append(status_icon)
+        
+        # Status label
+        status_label = Gtk.Label()
+        status_label.set_text(_("Ready"))
+        status_label.set_css_classes(["dim-label"])
+        status_box.append(status_label)
+        
+        expander.add_prefix(status_box)
+        
+        # Delete button with modern styling
         delete_button = Gtk.Button()
         delete_button.set_icon_name("user-trash-symbolic")
         delete_button.set_tooltip_text(_("Delete this version"))
         delete_button.set_css_classes(["destructive-action", "circular"])
         delete_button.connect("clicked", self.on_delete_proton_version, version)
         
-        row.add_suffix(delete_button)
-        return row
+        expander.add_suffix(delete_button)
+        
+        # Create detailed content for the accordion
+        content_box = Gtk.Box()
+        content_box.set_orientation(Gtk.Orientation.VERTICAL)
+        content_box.set_spacing(16)
+        content_box.set_margin_top(12)
+        content_box.set_margin_bottom(12)
+        content_box.set_margin_start(12)
+        content_box.set_margin_end(12)
+        
+        # Version info section
+        info_section = self.create_version_info_section(version)
+        content_box.append(info_section)
+        
+        # Actions section
+        actions_section = self.create_version_actions_section(version)
+        content_box.append(actions_section)
+        
+        expander.add_row(content_box)
+        
+        return expander
     
     def create_version_info_section(self, version: str) -> Gtk.Widget:
         """Create detailed information section for a version"""
@@ -1089,12 +1188,12 @@ class SOFLPreferences(Adw.PreferencesDialog):
             logging.error(f"[Preferences] Error testing version {version}: {e}")
             self.add_toast(Adw.Toast.new(_("Failed to test version")))
 
-    def create_available_version_row(self, version_info: dict) -> Adw.ActionRow:
-        """Create a simple row for an available Proton version"""
-        row = Adw.ActionRow()
+    def create_available_version_row(self, version_info: dict) -> Adw.ExpanderRow:
+        """Create a beautiful accordion row for an available Proton version"""
+        expander = Adw.ExpanderRow()
         tag_name = version_info.get("tag_name", "Unknown")
         name = version_info.get("name", tag_name)
-        row.set_title(name)
+        expander.set_title(name)
         
         # Create subtitle with size and date
         size_bytes = version_info.get("size", 0)
@@ -1106,6 +1205,7 @@ class SOFLPreferences(Adw.PreferencesDialog):
             subtitle_parts.append(_("Size: {:.1f} MB").format(size_mb))
         
         if published_at:
+            # Format date nicely
             try:
                 from datetime import datetime
                 date_obj = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
@@ -1115,18 +1215,58 @@ class SOFLPreferences(Adw.PreferencesDialog):
                 pass
         
         subtitle = " • ".join(subtitle_parts) if subtitle_parts else _("Available for download")
-        row.set_subtitle(subtitle)
+        expander.set_subtitle(subtitle)
         
-        # Simple download button - just icon, no background, square
+        # Create version info prefix
+        info_box = Gtk.Box()
+        info_box.set_orientation(Gtk.Orientation.HORIZONTAL)
+        info_box.set_spacing(8)
+        
+        # Version icon
+        version_icon = Gtk.Image()
+        version_icon.set_from_icon_name("package-x-generic-symbolic")
+        version_icon.set_pixel_size(16)
+        info_box.append(version_icon)
+        
+        # Download count if available
+        download_count = version_info.get("download_count", 0)
+        if download_count > 0:
+            count_label = Gtk.Label()
+            count_label.set_text(_("{} downloads").format(download_count))
+            count_label.set_css_classes(["dim-label"])
+            info_box.append(count_label)
+        
+        expander.add_prefix(info_box)
+        
+        # Download button in suffix
         download_button = Gtk.Button()
         download_button.set_icon_name("download-symbolic")
         download_button.set_tooltip_text(_("Download and install this version"))
-        download_button.set_css_classes(["flat", "circular"])
-        download_button.set_size_request(32, 32)
+        download_button.set_css_classes(["suggested-action", "circular"])
         download_button.connect("clicked", self.on_download_proton_version, version_info)
         
-        row.add_suffix(download_button)
-        return row
+        expander.add_suffix(download_button)
+        
+        # Create detailed content for the accordion
+        content_box = Gtk.Box()
+        content_box.set_orientation(Gtk.Orientation.VERTICAL)
+        content_box.set_spacing(16)
+        content_box.set_margin_top(12)
+        content_box.set_margin_bottom(12)
+        content_box.set_margin_start(12)
+        content_box.set_margin_end(12)
+        
+        # Version details section
+        details_section = self.create_available_version_details(version_info)
+        content_box.append(details_section)
+        
+        # Download actions section
+        actions_section = self.create_available_version_actions(version_info)
+        content_box.append(actions_section)
+        
+        expander.add_row(content_box)
+        
+        return expander
     
     def create_available_version_details(self, version_info: dict) -> Gtk.Widget:
         """Create detailed information section for an available version"""
@@ -1347,55 +1487,142 @@ class SOFLPreferences(Adw.PreferencesDialog):
             self.add_toast(Adw.Toast.new(_("Error deleting version")))
 
     def on_download_proton_version(self, button: Gtk.Button, version_info: dict) -> None:
-        """Handle download Proton version button click"""
-        try:
-            # Disable button and show loading state
-            button.set_sensitive(False)
-            button.set_icon_name("process-working-symbolic")
-            
-            # Start download in separate thread
-            def download_thread():
-                try:
-                    tag_name = version_info.get("tag_name", "")
-                    self.proton_manager_instance.download_version(tag_name, self.on_download_progress)
-                    GLib.idle_add(self.on_download_complete, version_info, button)
-                except Exception as e:
-                    logging.error(f"[Preferences] Error downloading version: {e}")
-                    GLib.idle_add(self.on_download_error, version_info, str(e), button)
-            
-            thread = threading.Thread(target=download_thread, daemon=True)
-            thread.start()
-            
-        except Exception as e:
-            logging.error(f"[Preferences] Error starting download: {e}")
-            self.add_toast(Adw.Toast.new(_("Failed to start download")))
+        """Handle download Proton version button click with beautiful dialog"""
+        button.set_sensitive(False)
+        button.set_icon_name("process-working-symbolic")
+        
+        # Create modern progress dialog
+        progress_dialog = Adw.Window()
+        progress_dialog.set_title(_("Downloading Proton"))
+        progress_dialog.set_default_size(450, 300)
+        progress_dialog.set_modal(True)
+        progress_dialog.set_transient_for(self)
+        progress_dialog.set_resizable(False)
+        
+        # Main content with modern styling
+        content = Gtk.Box()
+        content.set_orientation(Gtk.Orientation.VERTICAL)
+        content.set_spacing(24)
+        content.set_margin_top(32)
+        content.set_margin_bottom(32)
+        content.set_margin_start(32)
+        content.set_margin_end(32)
+        content.set_halign(Gtk.Align.CENTER)
+        
+        # Header with icon and title
+        header_box = Gtk.Box()
+        header_box.set_orientation(Gtk.Orientation.VERTICAL)
+        header_box.set_spacing(16)
+        header_box.set_halign(Gtk.Align.CENTER)
+        
+        # Download icon
+        download_icon = Gtk.Image()
+        download_icon.set_from_icon_name("download-symbolic")
+        download_icon.set_pixel_size(48)
+        header_box.append(download_icon)
+        
+        # Title
+        title_label = Gtk.Label()
+        title_label.set_text(_("Downloading {}").format(version_info.get("name", "Proton version")))
+        title_label.set_css_classes(["title-2"])
+        title_label.set_halign(Gtk.Align.CENTER)
+        header_box.append(title_label)
+        
+        # Subtitle with size info
+        size_bytes = version_info.get("size", 0)
+        if size_bytes > 0:
+            size_mb = size_bytes / (1024 * 1024)
+            subtitle_label = Gtk.Label()
+            subtitle_label.set_text(_("Size: {:.1f} MB").format(size_mb))
+            subtitle_label.set_css_classes(["dim-label"])
+            subtitle_label.set_halign(Gtk.Align.CENTER)
+            header_box.append(subtitle_label)
+        
+        content.append(header_box)
+        
+        # Progress section
+        progress_box = Gtk.Box()
+        progress_box.set_orientation(Gtk.Orientation.VERTICAL)
+        progress_box.set_spacing(12)
+        progress_box.set_hexpand(True)
+        
+        # Progress bar with modern styling
+        progress_bar = Gtk.ProgressBar()
+        progress_bar.set_show_text(True)
+        progress_bar.set_css_classes(["osd"])
+        progress_box.append(progress_bar)
+        
+        # Status label
+        status_label = Gtk.Label()
+        status_label.set_text(_("Preparing download..."))
+        status_label.set_css_classes(["dim-label"])
+        status_label.set_halign(Gtk.Align.CENTER)
+        progress_box.append(status_label)
+        
+        content.append(progress_box)
+        
+        # Cancel button
+        button_box = Gtk.Box()
+        button_box.set_orientation(Gtk.Orientation.HORIZONTAL)
+        button_box.set_halign(Gtk.Align.CENTER)
+        
+        cancel_button = Gtk.Button()
+        cancel_button.set_label(_("Cancel"))
+        cancel_button.set_css_classes(["pill"])
+        cancel_button.connect("clicked", lambda btn: progress_dialog.close())
+        button_box.append(cancel_button)
+        
+        content.append(button_box)
+        
+        progress_dialog.set_content(content)
+        progress_dialog.present()
+        
+        def progress_callback(progress: float):
+            GLib.idle_add(lambda: progress_bar.set_fraction(progress))
+            if progress < 1.0:
+                GLib.idle_add(lambda: status_label.set_text(_("Downloading... {:.0f}%").format(progress * 100)))
+            else:
+                GLib.idle_add(lambda: status_label.set_text(_("Installing... Please wait")))
+        
+        def download_complete():
+            GLib.idle_add(self.on_download_complete, version_info, progress_dialog, button)
+        
+        def download_error(error: str):
+            GLib.idle_add(self.on_download_error, version_info, progress_dialog, button, error)
+        
+        # Start download in separate thread
+        import threading
+        def download_thread():
+            try:
+                success = self.proton_manager_instance.download_version(version_info, progress_callback)
+                if success:
+                    download_complete()
+                else:
+                    download_error(_("Download failed"))
+            except Exception as e:
+                download_error(str(e))
+        
+        thread = threading.Thread(target=download_thread)
+        thread.daemon = True
+        thread.start()
 
-    def on_download_complete(self, version_info: dict, button: Gtk.Button) -> None:
+    def on_download_complete(self, version_info: dict, dialog: Adw.MessageDialog, button: Gtk.Button) -> None:
         """Handle successful download"""
-        try:
-            tag_name = version_info.get("tag_name", "Unknown")
-            self.add_toast(Adw.Toast.new(_("Version {} downloaded successfully").format(tag_name)))
-            self.refresh_installed_versions()
-            self.update_proton_combo()
-            
-            # Restore button state
-            button.set_sensitive(True)
-            button.set_icon_name("download-symbolic")
-        except Exception as e:
-            logging.error(f"[Preferences] Error handling download completion: {e}")
+        dialog.close()
+        button.set_sensitive(True)
+        button.set_icon_name("download-symbolic")
+        
+        self.add_toast(Adw.Toast.new(_("{} downloaded successfully").format(version_info["name"])))
+        self.refresh_installed_versions()
+        self.update_proton_combo()
 
-    def on_download_error(self, version_info: dict, error: str, button: Gtk.Button) -> None:
+    def on_download_error(self, version_info: dict, dialog: Adw.MessageDialog, button: Gtk.Button, error: str) -> None:
         """Handle download error"""
-        try:
-            tag_name = version_info.get("tag_name", "Unknown")
-            logging.error(f"[Preferences] Download error for {tag_name}: {error}")
-            self.add_toast(Adw.Toast.new(_("Failed to download version")))
-            
-            # Restore button state
-            button.set_sensitive(True)
-            button.set_icon_name("download-symbolic")
-        except Exception as e:
-            logging.error(f"[Preferences] Error handling download error: {e}")
+        dialog.close()
+        button.set_sensitive(True)
+        button.set_icon_name("download-symbolic")
+        
+        self.add_toast(Adw.Toast.new(_("Failed to download {}: {}").format(version_info["name"], error)))
 
     def on_proton_retry_clicked(self, button: Gtk.Button) -> None:
         """Handle retry button click"""

@@ -1,0 +1,70 @@
+using Gtk 4.0;
+using Adw 1;
+
+template $ProtonManager: Adw.PreferencesGroup {
+  title: _("Proton Manager");
+  description: _("Download and manage GE-Proton versions");
+
+  // Installed versions section
+  Adw.PreferencesGroup installed_group {
+    title: _("Installed Versions");
+    description: _("Manage your installed Proton versions");
+
+    // Status page for when no versions are installed
+    Adw.StatusPage installed_empty_page {
+      visible: false;
+      title: _("No Proton versions installed");
+      description: _("Download a version to get started");
+      icon-name: "package-x-generic-symbolic";
+    }
+
+    // List of installed versions
+    Box installed_versions_box {
+      orientation: vertical;
+    }
+  }
+
+  // Available versions section
+  Adw.PreferencesGroup available_group {
+    title: _("Available Versions");
+    description: _("Download the latest GE-Proton releases");
+
+    // Loading state
+    Box loading_box {
+      visible: false;
+      orientation: horizontal;
+      spacing: 12;
+      halign: center;
+      margin-top: 12;
+      margin-bottom: 12;
+
+      Gtk.Spinner loading_spinner {
+        active: true;
+      }
+
+      Label loading_label {
+        label: _("Loading available versions...");
+      }
+    }
+
+    // Error state
+    Adw.StatusPage error_page {
+      visible: false;
+      title: _("Failed to load versions");
+      description: _("Check your internet connection and try again");
+      icon-name: "network-error-symbolic";
+
+      [child]
+      Button retry_button {
+        label: _("Retry");
+        css-classes: ["pill", "suggested-action"];
+      }
+    }
+
+    // List of available versions
+    Box available_versions_box {
+      orientation: vertical;
+    }
+  }
+}
+
