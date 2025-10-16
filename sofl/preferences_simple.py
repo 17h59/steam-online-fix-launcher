@@ -278,8 +278,7 @@ class SOFLPreferences(Adw.PreferencesWindow):
             # Start download in separate thread
             def download_thread():
                 try:
-                    tag_name = version_info.get("tag_name", "")
-                    self.proton_manager_instance.download_version(tag_name, self.on_download_progress)
+                    self.proton_manager_instance.download_version(version_info, self.on_download_progress)
                     GLib.idle_add(self.on_download_complete, version_info)
                 except Exception as e:
                     logging.error(f"[Preferences] Error downloading version: {e}")

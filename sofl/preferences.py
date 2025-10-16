@@ -20,6 +20,7 @@
 
 import logging
 import re
+import threading
 from pathlib import Path
 from shutil import rmtree
 from sys import platform
@@ -140,6 +141,9 @@ class SOFLPreferences(Adw.PreferencesDialog):
 
     removed_games: set[Game] = set()
     warning_menu_buttons: dict = {}
+    
+    # Download progress tracking
+    active_downloads: dict = {}  # {version_name: {'row': row, 'progress_bar': bar, 'cancel_button': btn}}
 
     is_open = False
 
@@ -210,11 +214,11 @@ class SOFLPreferences(Adw.PreferencesDialog):
             )
         )
 
+        # Proton Manager setup (must be before Online-Fix setup)
+        self.setup_proton_manager()
+        
         # Online-Fix setup
         self.setup_online_fix_settings()
-
-        # Proton Manager setup
-        self.setup_proton_manager()
 
         def update_sgdb(*_args: Any) -> None:
             counter = 0
@@ -710,6 +714,8 @@ class SOFLPreferences(Adw.PreferencesDialog):
         self.proton_manager_instance = ProtonManager()
         self.setup_proton_manager_ui()
         self.refresh_proton_versions()
+        # Update combo box with installed versions
+        self.update_proton_combo()
 
     def setup_proton_manager_ui(self) -> None:
         """Setup Proton Manager UI components with simple accordion design"""
@@ -817,7 +823,6 @@ class SOFLPreferences(Adw.PreferencesDialog):
                     logging.error(f"[Preferences] Error in fetch thread: {e}")
                     GLib.idle_add(self.on_available_versions_error, str(e))
             
-            import threading
             thread = threading.Thread(target=fetch_versions)
             thread.daemon = True
             thread.start()
@@ -902,7 +907,8 @@ class SOFLPreferences(Adw.PreferencesDialog):
             retry_button = Gtk.Button()
             retry_button.set_icon_name("view-refresh-symbolic")
             retry_button.set_tooltip_text(_("Retry"))
-            retry_button.set_css_classes(["circular"])
+            retry_button.set_css_classes(["flat"])
+            retry_button.set_valign(Gtk.Align.CENTER)
             retry_button.connect("clicked", self.on_proton_retry_clicked)
             error_box.append(retry_button)
             
@@ -922,7 +928,8 @@ class SOFLPreferences(Adw.PreferencesDialog):
         delete_button = Gtk.Button()
         delete_button.set_icon_name("user-trash-symbolic")
         delete_button.set_tooltip_text(_("Delete this version"))
-        delete_button.set_css_classes(["destructive-action", "circular"])
+        delete_button.set_css_classes(["destructive-action", "flat"])
+        delete_button.set_valign(Gtk.Align.CENTER)
         delete_button.connect("clicked", self.on_delete_proton_version, version)
         
         row.add_suffix(delete_button)
@@ -1117,15 +1124,49 @@ class SOFLPreferences(Adw.PreferencesDialog):
         subtitle = " • ".join(subtitle_parts) if subtitle_parts else _("Available for download")
         row.set_subtitle(subtitle)
         
-        # Simple download button - just icon, no background, square
-        download_button = Gtk.Button()
-        download_button.set_icon_name("download-symbolic")
-        download_button.set_tooltip_text(_("Download and install this version"))
-        download_button.set_css_classes(["flat", "circular"])
-        download_button.set_size_request(32, 32)
-        download_button.connect("clicked", self.on_download_proton_version, version_info)
+        # Create a box for buttons
+        button_box = Gtk.Box()
+        button_box.set_orientation(Gtk.Orientation.HORIZONTAL)
+        button_box.set_spacing(6)
         
-        row.add_suffix(download_button)
+        # Progress bar (hidden by default)
+        progress_bar = Gtk.ProgressBar()
+        progress_bar.set_visible(False)
+        progress_bar.set_valign(Gtk.Align.CENTER)
+        progress_bar.set_hexpand(True)
+        progress_bar.set_show_text(True)
+        button_box.append(progress_bar)
+        
+        # Cancel button (hidden by default)
+        cancel_button = Gtk.Button()
+        cancel_button.set_icon_name("process-stop-symbolic")
+        cancel_button.set_tooltip_text(_("Cancel download"))
+        cancel_button.set_css_classes(["flat", "error"])
+        cancel_button.set_valign(Gtk.Align.CENTER)
+        cancel_button.set_visible(False)
+        cancel_button.connect("clicked", self.on_cancel_download, version_info)
+        button_box.append(cancel_button)
+        
+        # Download button
+        download_button = Gtk.Button()
+        download_button.set_icon_name("folder-download-symbolic")
+        download_button.set_tooltip_text(_("Download and install this version"))
+        download_button.set_css_classes(["flat"])
+        download_button.set_valign(Gtk.Align.CENTER)
+        download_button.connect("clicked", self.on_download_proton_version, version_info, progress_bar, cancel_button)
+        button_box.append(download_button)
+        
+        row.add_suffix(button_box)
+        
+        # Store references for progress updates
+        self.active_downloads[tag_name] = {
+            'row': row,
+            'progress_bar': progress_bar,
+            'cancel_button': cancel_button,
+            'download_button': download_button,
+            'cancelled': False
+        }
+        
         return row
     
     def create_available_version_details(self, version_info: dict) -> Gtk.Widget:
@@ -1232,7 +1273,7 @@ class SOFLPreferences(Adw.PreferencesDialog):
         # Download button (larger, more prominent)
         download_button = Gtk.Button()
         download_button.set_label(_("Download & Install"))
-        download_button.set_icon_name("download-symbolic")
+        download_button.set_icon_name("folder-download-symbolic")
         download_button.set_css_classes(["suggested-action", "pill"])
         download_button.connect("clicked", self.on_download_proton_version, version_info)
         actions_grid.attach(download_button, 0, 0, 2, 1)
@@ -1316,11 +1357,13 @@ class SOFLPreferences(Adw.PreferencesDialog):
         """Handle delete Proton version button click with beautiful dialog"""
         # Create modern confirmation dialog
         dialog = Adw.MessageDialog()
-        dialog.set_transient_for(self)
+        parent_window = self.get_root()
+        if isinstance(parent_window, Gtk.Window):
+            dialog.set_transient_for(parent_window)
         dialog.set_heading(_("Delete Proton Version"))
         dialog.set_body(_("Are you sure you want to delete {}? This action cannot be undone and you will need to download it again if needed.").format(version))
         dialog.set_body_use_markup(True)
-        
+
         # Add responses
         dialog.add_response("cancel", _("Cancel"))
         dialog.add_response("delete", _("Delete"))
@@ -1346,22 +1389,69 @@ class SOFLPreferences(Adw.PreferencesDialog):
             logging.error(f"[Preferences] Error deleting version {version}: {e}")
             self.add_toast(Adw.Toast.new(_("Error deleting version")))
 
-    def on_download_proton_version(self, button: Gtk.Button, version_info: dict) -> None:
+    def on_download_progress(self, version_name: str, progress: float, message: str = "") -> None:
+        """Handle download progress updates"""
+        def update_ui():
+            if version_name in self.active_downloads:
+                download_info = self.active_downloads[version_name]
+                progress_bar = download_info['progress_bar']
+                progress_bar.set_fraction(progress)
+                
+                # Update text based on progress
+                if progress < 1.0:
+                    progress_bar.set_text(f"{int(progress * 100)}%")
+                else:
+                    progress_bar.set_text(_("Extracting..."))
+        
+        GLib.idle_add(update_ui)
+
+    def on_download_proton_version(self, button: Gtk.Button, version_info: dict, progress_bar: Gtk.ProgressBar, cancel_button: Gtk.Button) -> None:
         """Handle download Proton version button click"""
         try:
-            # Disable button and show loading state
-            button.set_sensitive(False)
-            button.set_icon_name("process-working-symbolic")
+            tag_name = version_info.get("tag_name", "Unknown")
+            
+            # Hide download button, show progress bar and cancel button
+            button.set_visible(False)
+            progress_bar.set_visible(True)
+            progress_bar.set_fraction(0.0)
+            progress_bar.set_text(_("Starting..."))
+            cancel_button.set_visible(True)
+            
+            # Mark as not cancelled
+            if tag_name in self.active_downloads:
+                self.active_downloads[tag_name]['cancelled'] = False
             
             # Start download in separate thread
             def download_thread():
                 try:
-                    tag_name = version_info.get("tag_name", "")
-                    self.proton_manager_instance.download_version(tag_name, self.on_download_progress)
-                    GLib.idle_add(self.on_download_complete, version_info, button)
+                    # Check if download was cancelled before starting
+                    if tag_name in self.active_downloads and self.active_downloads[tag_name]['cancelled']:
+                        GLib.idle_add(self.on_download_error, version_info, _("Download cancelled by user"), button, progress_bar, cancel_button)
+                        return
+
+                    # Create progress callback
+                    def progress_callback(progress: float):
+                        # Check if download was cancelled
+                        if tag_name in self.active_downloads and self.active_downloads[tag_name]['cancelled']:
+                            raise Exception(_("Download cancelled by user"))
+                        self.on_download_progress(tag_name, progress)
+
+                    success = self.proton_manager_instance.download_version(version_info, progress_callback)
+
+                    # Check if download was cancelled after completion
+                    if tag_name in self.active_downloads and self.active_downloads[tag_name]['cancelled']:
+                        GLib.idle_add(self.on_download_error, version_info, _("Download cancelled by user"), button, progress_bar, cancel_button)
+                    elif success:
+                        GLib.idle_add(self.on_download_complete, version_info, button, progress_bar, cancel_button)
+                    else:
+                        GLib.idle_add(self.on_download_error, version_info, _("Download failed"), button, progress_bar, cancel_button)
+
                 except Exception as e:
-                    logging.error(f"[Preferences] Error downloading version: {e}")
-                    GLib.idle_add(self.on_download_error, version_info, str(e), button)
+                    if "cancelled" in str(e).lower():
+                        GLib.idle_add(self.on_download_error, version_info, str(e), button, progress_bar, cancel_button)
+                    else:
+                        logging.error(f"[Preferences] Error downloading version: {e}")
+                        GLib.idle_add(self.on_download_error, version_info, str(e), button, progress_bar, cancel_button)
             
             thread = threading.Thread(target=download_thread, daemon=True)
             thread.start()
@@ -1370,7 +1460,7 @@ class SOFLPreferences(Adw.PreferencesDialog):
             logging.error(f"[Preferences] Error starting download: {e}")
             self.add_toast(Adw.Toast.new(_("Failed to start download")))
 
-    def on_download_complete(self, version_info: dict, button: Gtk.Button) -> None:
+    def on_download_complete(self, version_info: dict, button: Gtk.Button, progress_bar: Gtk.ProgressBar, cancel_button: Gtk.Button) -> None:
         """Handle successful download"""
         try:
             tag_name = version_info.get("tag_name", "Unknown")
@@ -1378,24 +1468,43 @@ class SOFLPreferences(Adw.PreferencesDialog):
             self.refresh_installed_versions()
             self.update_proton_combo()
             
-            # Restore button state
-            button.set_sensitive(True)
-            button.set_icon_name("download-symbolic")
+            # Hide progress bar and cancel button, show download button
+            progress_bar.set_visible(False)
+            cancel_button.set_visible(False)
+            button.set_visible(True)
         except Exception as e:
             logging.error(f"[Preferences] Error handling download completion: {e}")
 
-    def on_download_error(self, version_info: dict, error: str, button: Gtk.Button) -> None:
+    def on_download_error(self, version_info: dict, error: str, button: Gtk.Button, progress_bar: Gtk.ProgressBar, cancel_button: Gtk.Button) -> None:
         """Handle download error"""
         try:
             tag_name = version_info.get("tag_name", "Unknown")
             logging.error(f"[Preferences] Download error for {tag_name}: {error}")
-            self.add_toast(Adw.Toast.new(_("Failed to download version")))
-            
-            # Restore button state
-            button.set_sensitive(True)
-            button.set_icon_name("download-symbolic")
+
+            # Check if it was cancelled
+            if "cancel" in error.lower():
+                self.add_toast(Adw.Toast.new(_("Download cancelled")))
+            elif "failed" in error.lower():
+                self.add_toast(Adw.Toast.new(_("Failed to download version")))
+            else:
+                self.add_toast(Adw.Toast.new(_("Download error: {}").format(error)))
+
+            # Hide progress bar and cancel button, show download button
+            progress_bar.set_visible(False)
+            cancel_button.set_visible(False)
+            button.set_visible(True)
         except Exception as e:
             logging.error(f"[Preferences] Error handling download error: {e}")
+    
+    def on_cancel_download(self, button: Gtk.Button, version_info: dict) -> None:
+        """Handle cancel download button click"""
+        try:
+            tag_name = version_info.get("tag_name", "Unknown")
+            if tag_name in self.active_downloads:
+                self.active_downloads[tag_name]['cancelled'] = True
+                logging.info(f"[Preferences] Download cancelled for {tag_name}")
+        except Exception as e:
+            logging.error(f"[Preferences] Error cancelling download: {e}")
 
     def on_proton_retry_clicked(self, button: Gtk.Button) -> None:
         """Handle retry button click"""
@@ -1404,7 +1513,33 @@ class SOFLPreferences(Adw.PreferencesDialog):
     def update_proton_combo(self) -> None:
         """Update the Proton combo box with current installed versions"""
         try:
+            logging.info("[Preferences] Updating Proton combo box...")
             installed_versions = self.proton_manager_instance.get_installed_versions()
-            self.setup_proton_combo(self.online_fix_proton_combo, installed_versions, "online-fix-proton-version")
+            logging.info(f"[Preferences] Found {len(installed_versions)} installed versions: {installed_versions}")
+            
+            # Clear and rebuild the combo box model
+            proton_model = Gtk.StringList.new(installed_versions)
+            self.online_fix_proton_combo.set_model(proton_model)
+            
+            # Get current selection from settings
+            try:
+                current_proton = shared.schema.get_string("online-fix-proton-version")
+                logging.info(f"[Preferences] Current selection in settings: {current_proton}")
+            except GLib.Error:
+                current_proton = ""
+            
+            # Find and set the current selection
+            selected_idx = 0
+            for idx, version in enumerate(installed_versions):
+                if version == current_proton:
+                    selected_idx = idx
+                    break
+            
+            self.online_fix_proton_combo.set_selected(selected_idx)
+            
+            # If no versions available, show a warning
+            if not installed_versions:
+                logging.warning("[Preferences] No Proton versions found!")
+                
         except Exception as e:
             logging.error(f"[Preferences] Error updating proton combo: {e}")

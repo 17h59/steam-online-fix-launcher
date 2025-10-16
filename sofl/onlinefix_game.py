@@ -96,9 +96,27 @@ class OnlineFixGameData(GameData):
         proton_version = shared.schema.get_string("online-fix-proton-version")
         steam_home = os.path.join(host_home, ".local/share/Steam")
 
+        # If no Proton version is selected, try to use the first available one
+        if not proton_version:
+            proton_manager = ProtonManager()
+            available_versions = proton_manager.get_installed_versions()
+            if available_versions:
+                proton_version = available_versions[0]
+                shared.schema.set_string("online-fix-proton-version", proton_version)
+            else:
+                self._show_proton_manager_dialog()
+                return
+
         # Check if Proton version is selected and available
-        if not proton_version or not self._check_proton_available(proton_version, steam_home, in_flatpak):
+        if not self._check_proton_available(proton_version, steam_home, in_flatpak):
             self._show_proton_manager_dialog()
+            return
+
+        # Get Proton path
+        proton_manager = ProtonManager()
+        proton_path = proton_manager.get_proton_path(proton_version)
+        if not proton_path:
+            self.log_and_toast(_("Failed to find Proton executable for version {}").format(proton_version))
             return
 
         # Create Wine prefix
@@ -271,5 +289,5 @@ class OnlineFixGameData(GameData):
                 from sofl.preferences import SOFLPreferences
                 prefs = SOFLPreferences()
                 prefs.set_visible_page(prefs.proton_page)
-                prefs.present()
+                prefs.present(shared.win)  # Pass parent window to make it a dialog
                 shared.win.preferences = prefs

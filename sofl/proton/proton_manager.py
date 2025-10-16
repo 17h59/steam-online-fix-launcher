@@ -159,53 +159,74 @@ class ProtonManager:
     
     def download_version(self, version_info: Dict[str, Any], progress_callback: Optional[Callable[[float], None]] = None) -> bool:
         """Download and install a Proton version"""
+        tag_name = version_info.get('tag_name', 'Unknown')
+
         try:
+            logging.info(f"[ProtonManager] Starting download for {tag_name}...")
+
             compat_path = self.get_steam_compat_path()
             compat_path.mkdir(parents=True, exist_ok=True)
-            
+
             # Create temporary directory for download
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_path = Path(temp_dir)
-                tar_file = temp_path / f"{version_info['tag_name']}.tar.gz"
-                
+                tar_file = temp_path / f"{tag_name}.tar.gz"
+
                 # Download with progress
                 def download_progress(block_num, block_size, total_size):
                     if progress_callback and total_size > 0:
                         progress = (block_num * block_size) / total_size
                         progress_callback(min(progress, 1.0))
-                
-                logging.info(f"[ProtonManager] Downloading {version_info['tag_name']}...")
+
+                logging.info(f"[ProtonManager] Downloading {tag_name}...")
                 urlretrieve(version_info["download_url"], tar_file, download_progress)
-                
+
                 if progress_callback:
                     progress_callback(1.0)
-                
+
                 # Extract to compatibilitytools.d
-                logging.info(f"[ProtonManager] Extracting {version_info['tag_name']}...")
+                logging.info(f"[ProtonManager] Extracting {tag_name}...")
                 with tarfile.open(tar_file, "r:gz") as tar:
                     tar.extractall(compat_path)
-                
-                logging.info(f"[ProtonManager] Successfully installed {version_info['tag_name']}")
+
+                logging.info(f"[ProtonManager] Successfully installed {tag_name}")
                 return True
-                
+
         except Exception as e:
-            logging.error(f"[ProtonManager] Failed to download {version_info['tag_name']}: {e}")
+            logging.error(f"[ProtonManager] Failed to download {tag_name}: {e}")
             return False
     
     def delete_version(self, version: str) -> bool:
         """Delete an installed Proton version"""
         try:
+            # First try to delete from compatibilitytools.d (user installed versions)
             compat_path = self.get_steam_compat_path()
             version_path = compat_path / version
-            
-            if not version_path.exists():
-                logging.warning(f"[ProtonManager] Version {version} not found")
-                return False
-            
-            shutil.rmtree(version_path)
-            logging.info(f"[ProtonManager] Successfully deleted {version}")
-            return True
-            
+
+            if version_path.exists():
+                shutil.rmtree(version_path)
+                logging.info(f"[ProtonManager] Successfully deleted {version} from compatibilitytools.d")
+                return True
+
+            # If not found in compatibilitytools.d, try steamapps/common (official versions)
+            home = Path.home()
+            steam_common_paths = [
+                home / ".local/share/Steam/steamapps/common",
+                home / ".steam/steam/steamapps/common"
+            ]
+
+            for common_path in steam_common_paths:
+                if common_path.exists():
+                    version_path = common_path / version
+                    if version_path.exists():
+                        shutil.rmtree(version_path)
+                        logging.info(f"[ProtonManager] Successfully deleted {version} from {common_path}")
+                        return True
+
+            # Version not found in any location
+            logging.warning(f"[ProtonManager] Version {version} not found in any location")
+            return False
+
         except Exception as e:
             logging.error(f"[ProtonManager] Failed to delete {version}: {e}")
             return False
@@ -216,12 +237,26 @@ class ProtonManager:
     
     def get_proton_path(self, version: str) -> Optional[Path]:
         """Get the path to a specific Proton version's proton script"""
+        # First try to find in compatibilitytools.d (user installed versions)
         compat_path = self.get_steam_compat_path()
         proton_path = compat_path / version / "proton"
-        
+
         if proton_path.exists() and proton_path.is_file():
             return proton_path
-        
+
+        # If not found in compatibilitytools.d, try steamapps/common (official versions)
+        home = Path.home()
+        steam_common_paths = [
+            home / ".local/share/Steam/steamapps/common",
+            home / ".steam/steam/steamapps/common"
+        ]
+
+        for common_path in steam_common_paths:
+            if common_path.exists():
+                proton_path = common_path / version / "proton"
+                if proton_path.exists() and proton_path.is_file():
+                    return proton_path
+
         return None
     
     def check_proton_exists(self, version: str) -> bool:
