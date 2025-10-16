@@ -28,6 +28,7 @@ from gi.repository import Adw
 
 from sofl import shared
 from sofl.game_data import GameData
+from sofl.proton.proton_manager import ProtonManager
 from sofl.utils.create_dialog import create_dialog
 from sofl.utils.path_utils import normalize_executable_path
 from sofl.utils.steam_launcher import SteamLauncher
@@ -95,12 +96,27 @@ class OnlineFixGameData(GameData):
         proton_version = shared.schema.get_string("online-fix-proton-version")
         steam_home = os.path.join(host_home, ".local/share/Steam")
 
-        # Check Proton existence
-        proton_path = os.path.join(
-            steam_home, "compatibilitytools.d", proton_version, "proton"
-        )
-        if not SteamLauncher.check_proton_exists(proton_version, steam_home, in_flatpak):
-            self.log_and_toast(_("Proton version not found: {}").format(proton_version))
+        # If no Proton version is selected, try to use the first available one
+        if not proton_version:
+            proton_manager = ProtonManager()
+            available_versions = proton_manager.get_installed_versions()
+            if available_versions:
+                proton_version = available_versions[0]
+                shared.schema.set_string("online-fix-proton-version", proton_version)
+            else:
+                self._show_proton_manager_dialog()
+                return
+
+        # Check if Proton version is selected and available
+        if not self._check_proton_available(proton_version, steam_home, in_flatpak):
+            self._show_proton_manager_dialog()
+            return
+
+        # Get Proton path
+        proton_manager = ProtonManager()
+        proton_path = proton_manager.get_proton_path(proton_version)
+        if not proton_path:
+            self.log_and_toast(_("Failed to find Proton executable for version {}").format(proton_version))
             return
 
         # Create Wine prefix
@@ -238,3 +254,40 @@ class OnlineFixGameData(GameData):
         """Log a message and show a toast notification"""
         logging.info(f"[SOFL] {message}")
         self.create_toast(message)
+
+    def _check_proton_available(self, proton_version: str, steam_home: str, in_flatpak: bool) -> bool:
+        """Check if Proton version is available using ProtonManager"""
+        try:
+            proton_manager = ProtonManager()
+            return proton_manager.check_proton_exists(proton_version)
+        except Exception as e:
+            logging.error(f"[SOFL] Error checking Proton availability: {e}")
+            # Fallback to old method
+            return SteamLauncher.check_proton_exists(proton_version, steam_home, in_flatpak)
+
+    def _show_proton_manager_dialog(self) -> None:
+        """Show dialog to open Proton Manager"""
+        dialog = create_dialog(
+            shared.win,
+            _("Proton Not Available"),
+            _("No Proton version is selected or installed. Please download and select a Proton version to run this game."),
+            "open_proton_manager",
+            _("Open Proton Manager"),
+        )
+        dialog.set_response_appearance("open_proton_manager", Adw.ResponseAppearance.SUGGESTED)
+        dialog.connect("response", self._on_proton_manager_dialog_response)
+
+    def _on_proton_manager_dialog_response(self, dialog: Adw.MessageDialog, response: str) -> None:
+        """Handle Proton Manager dialog response"""
+        if response == "open_proton_manager":
+            # Open preferences dialog on Proton Manager page
+            if hasattr(shared.win, 'preferences') and shared.win.preferences:
+                shared.win.preferences.set_visible_page(shared.win.preferences.proton_page)
+                shared.win.preferences.present()
+            else:
+                # Create new preferences dialog if it doesn't exist
+                from sofl.preferences import SOFLPreferences
+                prefs = SOFLPreferences()
+                prefs.set_visible_page(prefs.proton_page)
+                prefs.present(shared.win)  # Pass parent window to make it a dialog
+                shared.win.preferences = prefs
