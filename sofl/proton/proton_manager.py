@@ -77,22 +77,27 @@ class ProtonManager:
     def get_installed_versions(self) -> List[str]:
         """Get list of installed Proton versions"""
         versions = []
-        
-        # Check compatibilitytools.d directory for GE-Proton
-        compat_path = self.get_steam_compat_path()
-        if compat_path.exists():
-            try:
-                for item in compat_path.iterdir():
-                    if item.is_dir() and (
-                        item.name.startswith("GE-Proton") or 
-                        item.name.startswith("Proton")
-                    ):
-                        # Check if it's a valid Proton installation
-                        proton_script = item / "proton"
-                        if proton_script.exists() and proton_script.is_file():
-                            versions.append(item.name)
-            except Exception as e:
-                logging.error(f"[ProtonManager] Error reading compatibilitytools.d: {e}")
+
+        # Check compatibilitytools.d directories for GE-Proton (user and system)
+        compat_paths = [
+            self.get_steam_compat_path(),  # User path
+            Path("/usr/share/steam/compatibilitytools.d")  # System path
+        ]
+
+        for compat_path in compat_paths:
+            if compat_path.exists():
+                try:
+                    for item in compat_path.iterdir():
+                        if item.is_dir() and (
+                            item.name.startswith("GE-Proton") or
+                            item.name.startswith("Proton")
+                        ):
+                            # Check if it's a valid Proton installation
+                            proton_script = item / "proton"
+                            if proton_script.exists() and proton_script.is_file():
+                                versions.append(item.name)
+                except Exception as e:
+                    logging.error(f"[ProtonManager] Error reading {compat_path}: {e}")
         
         # Also check Steam's common directory for standard Proton
         home = Path.home()
@@ -237,12 +242,16 @@ class ProtonManager:
     
     def get_proton_path(self, version: str) -> Optional[Path]:
         """Get the path to a specific Proton version's proton script"""
-        # First try to find in compatibilitytools.d (user installed versions)
-        compat_path = self.get_steam_compat_path()
-        proton_path = compat_path / version / "proton"
+        # Check compatibilitytools.d directories (user and system)
+        compat_paths = [
+            self.get_steam_compat_path(),  # User path
+            Path("/usr/share/steam/compatibilitytools.d")  # System path
+        ]
 
-        if proton_path.exists() and proton_path.is_file():
-            return proton_path
+        for compat_path in compat_paths:
+            proton_path = compat_path / version / "proton"
+            if proton_path.exists() and proton_path.is_file():
+                return proton_path
 
         # If not found in compatibilitytools.d, try steamapps/common (official versions)
         home = Path.home()
