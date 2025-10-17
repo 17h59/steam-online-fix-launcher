@@ -100,7 +100,7 @@ class OnlineFixGameData(GameData):
 
         # Check if Steam is running
         if not SteamLauncher.check_steam_running(in_flatpak):
-            self.log_and_toast(_("Steam is not running"))
+            self._show_steam_not_running_dialog(in_flatpak)
             return
 
         # Get Proton settings
@@ -275,6 +275,37 @@ class OnlineFixGameData(GameData):
             logging.error(f"[SOFL] Error checking Proton availability: {e}")
             # Fallback to old method
             return SteamLauncher.check_proton_exists(proton_version, steam_home, in_flatpak)
+
+    def _show_steam_not_running_dialog(self, in_flatpak: bool) -> None:
+        """Show dialog when Steam is not running"""
+        dialog = Adw.MessageDialog()
+        dialog.set_transient_for(shared.win)
+        dialog.set_heading(_("Steam is not running"))
+        dialog.set_body(_("Steam must be running to play online-fix games. Would you like to start Steam?"))
+
+        # Add responses
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("start_steam", _("Start Steam"))
+        dialog.set_response_appearance("start_steam", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("start_steam")
+        dialog.connect("response", lambda d, r: self._on_steam_dialog_response(r, in_flatpak))
+        dialog.present()
+
+    def _on_steam_dialog_response(self, response: str, in_flatpak: bool) -> None:
+        """Handle Steam dialog response"""
+        if response == "start_steam":
+            import subprocess
+            try:
+                if in_flatpak:
+                    # Launch Steam through flatpak-spawn
+                    subprocess.Popen(["flatpak-spawn", "--host", "steam"], start_new_session=True)
+                else:
+                    # Launch Steam directly
+                    subprocess.Popen(["steam"], start_new_session=True)
+
+                self.log_and_toast(_("Starting Steam..."))
+            except Exception as e:
+                self.log_and_toast(_("Failed to start Steam: {}").format(str(e)))
 
     def _show_proton_manager_dialog(self) -> None:
         """Show dialog to open Proton Manager"""
