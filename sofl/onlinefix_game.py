@@ -52,7 +52,18 @@ class OnlineFixGameData(GameData):
         Returns:
             str: Path to created prefix
         """
-        prefix_path = os.path.join(game_exec.parent, "OFME Prefix")
+        # In Flatpak, we can't create prefix next to the game executable
+        # because the game path might be read-only. Use a writable location instead.
+        in_flatpak = os.path.exists("/.flatpak-info")
+        if in_flatpak:
+            # Use Flatpak data directory for Wine prefixes
+            import hashlib
+            game_path_hash = hashlib.md5(str(game_exec).encode()).hexdigest()[:8]
+            prefix_path = os.path.join(shared.home, ".var", "app", "org.badkiko.sofl", "data", "wine-prefixes", game_path_hash)
+        else:
+            # Use the traditional approach for native installations
+            prefix_path = os.path.join(game_exec.parent, "OFME Prefix")
+
         os.makedirs(prefix_path, exist_ok=True)
 
         # Create prefix structure for compatibility with original code
