@@ -161,8 +161,12 @@ class OnlineFixGameData(GameData):
             args_after
         )
 
-        # Launch game
-        SteamLauncher.launch_game(cmd_argv, env, game_exec.parent, in_flatpak)
+        # Launch game with tracking
+        process = SteamLauncher.launch_game_with_tracking(cmd_argv, env, game_exec.parent, in_flatpak)
+
+        # Notify window about game launch for tracking
+        if hasattr(shared, 'win') and shared.win and process:
+            shared.win.on_game_launched(self, process)
 
         self.create_toast(
             _("{} launched directly with Proton {}").format(self.name, proton_version)

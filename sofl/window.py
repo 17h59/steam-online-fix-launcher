@@ -21,6 +21,11 @@
 
 from sys import platform
 from typing import Any, Optional
+import subprocess
+import os
+import signal
+import logging
+from time import time
 
 from sofl import shared
 from sofl.game import Game
@@ -80,10 +85,18 @@ class SOFLWindow(Adw.ApplicationWindow):
     hidden_search_entry: Gtk.SearchEntry = Gtk.Template.Child()
     hidden_search_button: Gtk.ToggleButton = Gtk.Template.Child()
 
+    status_bar: Gtk.Box = Gtk.Template.Child()
+    status_label: Gtk.Label = Gtk.Template.Child()
+    stop_button: Gtk.Button = Gtk.Template.Child()
+    status_indicator: Gtk.Image = Gtk.Template.Child()
+
     game_covers: dict = {}
     toasts: dict = {}
     active_game: Game
     details_view_game_cover: Optional[GameCover] = None
+
+    running_processes: dict = {}  # {game_id: {"process": Popen, "game": Game}}
+    process_check_timer: Optional[int] = None
     sort_state: str = "last_played"
     filter_state: str = "all"
     source_rows: dict = {}
@@ -250,6 +263,12 @@ class SOFLWindow(Adw.ApplicationWindow):
         # Connect search entries
         self.search_bar.connect_entry(self.search_entry)
         self.hidden_search_bar.connect_entry(self.hidden_search_entry)
+
+        # Connect status bar signals
+        self.stop_button.connect("clicked", self.on_stop_button_clicked)
+
+        # Initialize status bar
+        self.update_status_bar()
 
         # Connect signals
         self.search_entry.connect("search-changed", self.search_changed, False)
@@ -572,3 +591,132 @@ class SOFLWindow(Adw.ApplicationWindow):
         shared.schema.set_string("force-theme", "dark" if is_dark else "light")
         # Update opacity for details view
         self.set_details_view_opacity()
+
+    def stop_all_games(self, *_args: Any) -> None:
+        """Stop all running games"""
+        logging.info(f"Stopping {len(self.running_processes)} running games")
+        for game_id, game_data in list(self.running_processes.items()):
+            try:
+                process = game_data["process"]
+                game = game_data["game"]
+
+                logging.info(f"Stopping process {process.pid} for game {game.name}")
+
+                # Try graceful termination first
+                if platform == "win32":
+                    process.terminate()
+                else:
+                    # For Proton/Wine processes, try wineserver first
+                    if game.source.startswith("online-fix"):
+                        logging.info(f"Trying wineserver kill for Proton game {game.name}")
+                        try:
+                            # Try to kill wineserver processes
+                            wineserver_processes = subprocess.run(
+                                ["pkill", "-f", "wineserver"],
+                                capture_output=True,
+                                timeout=5
+                            )
+                            logging.info("Sent wineserver kill signal")
+                        except (subprocess.TimeoutExpired, FileNotFoundError):
+                            logging.warning("wineserver kill failed, trying process group kill")
+
+                    # Try to terminate the process group
+                    try:
+                        pgid = os.getpgid(process.pid)
+                        logging.info(f"Sending SIGTERM to process group {pgid}")
+                        os.killpg(pgid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        logging.warning(f"Process group {process.pid} not found, trying direct kill")
+                        try:
+                            process.kill()
+                        except Exception:
+                            pass
+
+                # Wait a bit for graceful shutdown
+                try:
+                    process.wait(timeout=3)
+                    logging.info(f"Process {process.pid} terminated gracefully")
+                except subprocess.TimeoutExpired:
+                    # If still running, force kill the entire process group
+                    logging.warning(f"Process {process.pid} still running, force killing")
+                    try:
+                        if platform == "win32":
+                            process.kill()
+                        else:
+                            # Kill the entire process group
+                            pgid = os.getpgid(process.pid)
+                            logging.info(f"Sending SIGKILL to process group {pgid}")
+                            os.killpg(pgid, signal.SIGKILL)
+                            # Also try to kill the main process directly
+                            process.kill()
+                        process.wait(timeout=2)
+                        logging.info(f"Process {process.pid} force killed")
+                    except Exception as kill_e:
+                        logging.error(f"Failed to force kill game {game.name}: {kill_e}")
+
+            except Exception as e:
+                logging.error(f"Failed to stop game {game.name}: {e}")
+
+        self.running_processes.clear()
+        self.update_status_bar()
+
+    def update_status_bar(self) -> None:
+        """Update status bar based on running processes"""
+        if self.running_processes:
+            # Show running state
+            self.status_indicator.set_visible(True)
+            self.status_label.set_text(_("Игра запущена"))
+            self.stop_button.set_visible(True)
+            self.status_bar.set_visible(True)
+        else:
+            # Show idle state
+            self.status_indicator.set_visible(False)
+            self.status_label.set_text(_("Игра не запущена"))
+            self.stop_button.set_visible(False)
+            self.status_bar.set_visible(True)
+
+    def start_process_checking(self) -> None:
+        """Start periodic checking of running processes"""
+        def check_processes():
+            for game_id, game_data in list(self.running_processes.items()):
+                process = game_data["process"]
+                if process.poll() is not None:  # Process finished
+                    del self.running_processes[game_id]
+                    game = game_data["game"]
+                    # Update last played time
+                    game.last_played = int(time())
+                    game.save()
+
+            self.update_status_bar()
+
+            # Stop timer if no processes left
+            if not self.running_processes and self.process_check_timer:
+                GLib.source_remove(self.process_check_timer)
+                self.process_check_timer = None
+
+            return bool(self.running_processes)  # Continue if processes exist
+
+        self.process_check_timer = GLib.timeout_add_seconds(2, check_processes)
+
+    def on_game_launched(self, game_data, process) -> None:
+        """Handle game launch for tracking"""
+        self.running_processes[game_data.game_id] = {
+            "process": process,
+            "game": game_data
+        }
+
+        # Update UI
+        self.update_status_bar()
+
+        # Start process checking if not already running
+        if self.process_check_timer is None:
+            self.start_process_checking()
+
+    def on_stop_button_clicked(self, *_args: Any) -> None:
+        """Handle stop button click"""
+        self.stop_all_games()
+
+    def create_toast(self, message: str) -> None:
+        """Create and show a toast notification"""
+        toast = Adw.Toast.new(message)
+        self.toast_overlay.add_toast(toast)

@@ -66,3 +66,43 @@ def run_executable(executable) -> None:
         start_new_session=True,
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,  # type: ignore
     )
+
+
+def run_executable_with_tracking(executable):
+    """Safely launches executable file and returns process for tracking"""
+    import shlex
+
+    executable_path = normalize_executable_path(executable)
+
+    if not executable_path:
+        logging.error("Invalid executable path: %s", executable)
+        return None
+
+    # If executable is a string with arguments, safely parse it
+    if isinstance(executable, str) and " " in str(executable):
+        try:
+            # Try to parse as command with arguments
+            cmd_args = shlex.split(str(executable))
+            if len(cmd_args) > 1:
+                # There are arguments - use them
+                logging.info("Launching command with args: %s", cmd_args)
+                return subprocess.Popen(
+                    cmd_args,
+                    cwd=shared.home,
+                    shell=False,
+                    start_new_session=True,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,  # type: ignore
+                )
+        except ValueError:
+            # If parsing failed, continue with path
+            pass
+
+    # Launch executable file without arguments only
+    logging.info("Launching `%s`", executable_path)
+    return subprocess.Popen(
+        str(executable_path),
+        cwd=shared.home,
+        shell=False,
+        start_new_session=True,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,  # type: ignore
+    )

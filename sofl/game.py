@@ -211,7 +211,11 @@ class Game(Gtk.Box):
     
     # Delegate methods to data
     def launch(self) -> None:
-        self.data.launch()
+        # Update game data (last played time, etc.) without launching process
+        self.data.last_played = int(time())
+        self.data.save()
+        self.data.update()
+        # Process launching is handled by window.launch_game_with_tracking()
     
     def toggle_hidden(self, toast: bool = True) -> None:
         self.data.toggle_hidden(toast)

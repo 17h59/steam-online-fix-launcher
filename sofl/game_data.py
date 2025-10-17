@@ -25,7 +25,7 @@ from typing import Any, Optional, Callable
 from gi.repository import GObject
 
 from sofl import shared
-from sofl.utils.run_executable import run_executable
+from sofl.utils.run_executable import run_executable, run_executable_with_tracking
 
 from sofl.utils.path_utils import normalize_executable_path
 
@@ -116,7 +116,12 @@ class GameData(GObject.Object):
         self.save()
         self.update()
 
-        run_executable(self.executable)
+        # Launch with tracking
+        process = run_executable_with_tracking(self.executable)
+
+        # Notify window about game launch for tracking
+        if hasattr(shared, 'win') and shared.win and process:
+            shared.win.on_game_launched(self, process)
 
         if shared.schema.get_boolean("exit-after-launch"):
             shared.win.get_application().quit()
