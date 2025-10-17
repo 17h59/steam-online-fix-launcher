@@ -88,6 +88,7 @@ class Game(Gtk.Box):
         """Handles signal for update need"""
         # Update UI based on data
         self.title.set_label(self.data.name)
+        self.set_play_icon()  # Update play button icon and tooltip when game type changes
         self.emit("update-ready", {})
         
     def on_save_ready(self, data: GameData, _args: Any) -> None:
@@ -154,7 +155,12 @@ class Game(Gtk.Box):
     @property
     def source(self) -> str:
         return self.data.source
-    
+
+    @source.setter
+    def source(self, value: str) -> None:
+        self.data.source = value
+        self.data.base_source = value.split("_")[0]
+
     @property
     def base_source(self) -> str:
         return self.data.base_source

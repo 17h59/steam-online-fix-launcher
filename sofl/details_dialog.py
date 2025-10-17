@@ -93,8 +93,13 @@ class DetailsDialog(Adw.Dialog):
             self.game_cover.new_cover(self.game.get_cover_path())
             if self.game_cover.get_texture():
                 self.cover_button_delete_revealer.set_reveal_child(True)
-            # Hide game type selector when viewing existing game details
-            self.game_type.set_visible(False)
+            # Show game type selector for all games to allow changing type
+            self.game_type.set_visible(True)
+            # Set current game type based on current source
+            if self.game.source.startswith("online-fix"):
+                self.game_type.set_selected(0)  # Online-Fix Game
+            else:
+                self.game_type.set_selected(1)  # Regular Game (imported or other sources)
         else:
             self.set_title(_("Add New Game"))
             self.apply_button.set_label(_("Add"))
@@ -274,6 +279,46 @@ class DetailsDialog(Adw.Dialog):
                 )
                 return
 
+            # Handle game type change
+            if self.game:
+                current_game_type = self.game_type.get_selected()
+                is_currently_online_fix = self.game.source.startswith("online-fix")
+                want_online_fix = current_game_type == 0
+
+                # Check if type change is needed
+                if is_currently_online_fix != want_online_fix:
+                    # Store old source info for store update
+                    old_base_source = self.game.base_source
+
+                    # Update game properties
+                    if want_online_fix:
+                        self.game.source = "online-fix"
+                    else:
+                        self.game.source = "imported"
+
+                    # Update game position in store source_games
+                    if old_base_source in shared.store.source_games:
+                        # Remove from old source group
+                        if self.game.game_id in shared.store.source_games[old_base_source]:
+                            del shared.store.source_games[old_base_source][self.game.game_id]
+                            # Remove empty source group
+                            if not shared.store.source_games[old_base_source]:
+                                del shared.store.source_games[old_base_source]
+
+                    # Add to new source group
+                    if self.game.base_source not in shared.store.source_games:
+                        shared.store.source_games[self.game.base_source] = {}
+                    shared.store.source_games[self.game.base_source][self.game.game_id] = self.game
+
+                    # Update game data for type change
+                    self.game.data.update_values({
+                        "name": final_name,
+                        "developer": final_developer,
+                        "executable": final_executable,
+                    })
+                    # Continue with normal save process
+
+        # Update game properties (properties will be set even if already updated above)
         self.game.name = final_name
         self.game.developer = final_developer or None
         self.game.executable = final_executable
@@ -292,6 +337,10 @@ class DetailsDialog(Adw.Dialog):
         shared.store.add_game(self.game, {}, run_pipeline=False)
         self.game.save()
         self.game.update()
+
+        # Update details page if it's currently showing this game
+        if shared.win.navigation_view.get_visible_page() == shared.win.details_page and shared.win.active_game == self.game:
+            shared.win.show_details_page(self.game)
 
         # Get a cover from SGDB if none is present
         if not self.game_cover.get_texture():
@@ -443,3 +492,32 @@ class DetailsDialog(Adw.Dialog):
 
                 # Return focus to the main window
                 root.present()
+
+    def _generate_new_game_id(self, source_id: str) -> str:
+        """Generates a unique game ID for the specified source
+
+        Args:
+            source_id: Source identifier (e.g., "online-fix", "imported")
+
+        Returns:
+            str: Generated game ID
+        """
+        numbers = [0]
+        prefix = f"{source_id}_"
+
+        for game_id in shared.store.source_games.get(source_id, set()):
+            if not game_id.startswith(prefix):
+                continue
+            suffix = game_id[len(prefix) :]
+            if suffix.isdigit():
+                try:
+                    numbers.append(int(suffix))
+                except ValueError:
+                    self.logger.warning(f"Skipping non-numeric game ID: {game_id}")
+            else:
+                self.logger.warning(
+                    f"Skipping game ID with non-numeric suffix: {game_id}"
+                )
+
+        game_number = max(numbers) + 1
+        return f"{source_id}_{game_number}"

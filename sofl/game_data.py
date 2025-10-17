@@ -98,6 +98,8 @@ class GameData(GObject.Object):
 
     def get_play_button_label(self) -> str:
         """Return the label text for the play button"""
+        if self.source.startswith("online-fix"):
+            return _("Play with Online-Fix")
         return _("Play")
 
     def get_play_button_icon(self) -> str:
