@@ -218,7 +218,7 @@ class SteamLauncher:
 
             # Add directory change
             if game_dir:
-                full_cmd = ["sh", "-c", f"cd {shlex.quote(str(game_dir))} && exec \"$@\"", "sh"] + full_cmd[1:]
+                full_cmd = ["sh", "-c", f"cd {shlex.quote(str(game_dir))} && exec \"$@\"", "sh"] + full_cmd
 
             logging.info(f"[SOFL] Executing command via flatpak-spawn: {' '.join(shlex.quote(str(arg)) for arg in full_cmd)}")
             subprocess.Popen(full_cmd, start_new_session=True)
