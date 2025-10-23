@@ -415,6 +415,17 @@ template $SOFLPreferences: Adw.PreferencesDialog {
     }
   }
 
+  Adw.PreferencesPage proton_page {
+    name: "proton";
+    title: _("Proton Manager");
+    icon-name: "package-x-generic-symbolic";
+
+    Adw.PreferencesGroup proton_manager_group {
+      title: _("Proton Manager");
+      description: _("Download and manage GE-Proton versions");
+    }
+  }
+
   Adw.PreferencesPage online_fix_page {
     name: "online-fix";
     title: _("Online-Fix");

@@ -218,7 +218,7 @@ class SteamLauncher:
 
             # Add directory change
             if game_dir:
-                full_cmd = ["sh", "-c", f"cd {shlex.quote(str(game_dir))} && exec \"$@\"", "sh"] + full_cmd[1:]
+                full_cmd = ["sh", "-c", f"cd {shlex.quote(str(game_dir))} && exec \"$@\"", "sh"] + full_cmd
 
             logging.info(f"[SOFL] Executing command via flatpak-spawn: {' '.join(shlex.quote(str(arg)) for arg in full_cmd)}")
             subprocess.Popen(full_cmd, start_new_session=True)
@@ -226,3 +226,27 @@ class SteamLauncher:
             # In native environment launch directly
             logging.info(f"[SOFL] Executing command: {' '.join(shlex.quote(str(arg)) for arg in cmd_argv)}")
             subprocess.Popen(cmd_argv, cwd=str(game_dir), env={**os.environ, **env}, start_new_session=True)
+
+    @staticmethod
+    def launch_game_with_tracking(cmd_argv: List[str], env: Dict[str, str], game_dir: Path, in_flatpak: bool = False):
+        """Launches game in appropriate environment and returns process for tracking"""
+        if in_flatpak:
+            # In Flatpak use flatpak-spawn
+            env_args = []
+            for key, value in env.items():
+                str_value = str(value) if value is not None else ""
+                if str_value.strip():
+                    env_args.append(f"--env={key}={str_value}")
+
+            full_cmd = ["flatpak-spawn", "--host"] + env_args + cmd_argv
+
+            # Add directory change
+            if game_dir:
+                full_cmd = ["sh", "-c", f"cd {shlex.quote(str(game_dir))} && exec \"$@\"", "sh"] + full_cmd
+
+            logging.info(f"[SOFL] Executing command via flatpak-spawn: {' '.join(shlex.quote(str(arg)) for arg in full_cmd)}")
+            return subprocess.Popen(full_cmd, start_new_session=True)
+        else:
+            # In native environment launch directly
+            logging.info(f"[SOFL] Executing command: {' '.join(shlex.quote(str(arg)) for arg in cmd_argv)}")
+            return subprocess.Popen(cmd_argv, cwd=str(game_dir), env={**os.environ, **env}, start_new_session=True)

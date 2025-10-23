@@ -117,6 +117,10 @@
       </choices>
       <default>"light"</default>
     </key>
+    <key name="online-fix" type="b">
+      <default>true</default>
+    </key>
+
     <key name="online-fix-install-path" type="s">
       <default>"~/Games/Online-Fix"</default>
     </key>

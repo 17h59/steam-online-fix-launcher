@@ -70,8 +70,13 @@ template $SOFLWindow: Adw.ApplicationWindow {
     }
   }
 
-  Adw.ToastOverlay toast_overlay {
-    Adw.NavigationView navigation_view {
+  Box main_box {
+    orientation: vertical;
+
+    Adw.ToastOverlay toast_overlay {
+      vexpand: true;
+
+      Adw.NavigationView navigation_view {
       Adw.NavigationPage library_page {
         title: _("All Games");
 
@@ -251,6 +256,64 @@ template $SOFLWindow: Adw.ApplicationWindow {
             }
           }
         }
+      }
+    }
+    }
+
+    Separator status_separator {
+      orientation: horizontal;
+      margin-bottom: 6;
+    }
+
+    CenterBox status_bar {
+      halign: fill;
+      margin-start: 12;
+      margin-end: 12;
+      margin-bottom: 6;
+
+      styles [
+        "toolbar"
+      ]
+
+      [start]
+      Box {}
+
+      [center]
+      Box status_indicator_box {
+        orientation: horizontal;
+        halign: center;
+        spacing: 8;
+
+        Image status_indicator {
+          icon-name: "media-playback-start-symbolic";
+          pixel-size: 14;
+
+          styles [
+            "success"
+          ]
+        }
+
+        Label status_label {
+          label: _("Игра запущена");
+          valign: center;
+
+          styles [
+            "dim-label"
+          ]
+        }
+      }
+
+      [end]
+      Button stop_button {
+        icon-name: "media-playback-stop-symbolic";
+        tooltip-text: _("Остановить игру");
+        halign: end;
+        margin-end: 6;
+
+        styles [
+          "destructive-action",
+          "circular"
+        ]
       }
     }
   }

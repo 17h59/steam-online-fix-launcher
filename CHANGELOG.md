@@ -1,5 +1,30 @@
 # SOFL Changelog
 
+## [v0.0.3.4a] - 2025-10-23
+
+### New Features
+
+- **Game Process Monitoring**: Added real-time tracking of running games with visual status indicators
+- **Interactive Status Bar**: Implemented bottom status bar showing current game launch state
+- **Game Control Interface**: Added stop button for terminating running games with proper process management
+- **Enhanced UI States**: Status bar automatically hides when viewing game details for cleaner interface
+- **Improved Process Handling**: Better process termination for Wine/Proton games with fallback mechanisms
+- **Proton Manager**: Complete Proton version management system for downloading, installing, and removing GE-Proton versions
+
+### UI/UX Improvements
+
+- **Status Bar Design**: Modern minimalist status bar with play icon, status text, and stop button
+- **Visual Feedback**: Green play indicator and red stop button for clear game state communication
+- **Context-Aware UI**: Status bar visibility adapts to current navigation context
+- **Separator Management**: Proper handling of UI separators in different view states
+
+### Technical Enhancements
+
+- **Process Tracking**: Comprehensive process monitoring with automatic cleanup
+- **Signal Handling**: Proper SIGTERM/SIGKILL handling for different game types
+- **Wine/Proton Support**: Specialized process termination for compatibility layer games with wineserver kill support
+- **Error Handling**: Improved error handling for process launch and termination operations
+
 ## [v0.0.3.3a] - 2025-09-01
 
 ### Major Changes
