@@ -86,6 +86,7 @@ class SOFLWindow(Adw.ApplicationWindow):
     hidden_search_button: Gtk.ToggleButton = Gtk.Template.Child()
 
     status_bar: Gtk.Box = Gtk.Template.Child()
+    status_separator: Gtk.Separator = Gtk.Template.Child()
     status_label: Gtk.Label = Gtk.Template.Child()
     stop_button: Gtk.Button = Gtk.Template.Child()
     status_indicator: Gtk.Image = Gtk.Template.Child()
@@ -482,6 +483,11 @@ class SOFLWindow(Adw.ApplicationWindow):
             navigation_view.get_visible_page() == self.library_page
         )
 
+        # Hide status bar and separator when details page is shown
+        is_details_page = navigation_view.get_visible_page() == self.details_page
+        self.status_bar.set_visible(not is_details_page)
+        self.status_separator.set_visible(not is_details_page)
+
     def on_show_sidebar_action(self, *_args: Any) -> None:
         shared.state_schema.set_boolean(
             "show-sidebar", (value := not self.overlay_split_view.get_show_sidebar())
@@ -662,18 +668,28 @@ class SOFLWindow(Adw.ApplicationWindow):
 
     def update_status_bar(self) -> None:
         """Update status bar based on running processes"""
+        # Check if we're on details page - if so, hide everything
+        current_page = self.navigation_view.get_visible_page()
+        if current_page == self.details_page:
+            self.status_bar.set_visible(False)
+            self.status_separator.set_visible(False)
+            return
+
+        # Normal behavior for library pages
         if self.running_processes:
             # Show running state
             self.status_indicator.set_visible(True)
             self.status_label.set_text(_("Игра запущена"))
             self.stop_button.set_visible(True)
             self.status_bar.set_visible(True)
+            self.status_separator.set_visible(True)
         else:
             # Show idle state
             self.status_indicator.set_visible(False)
             self.status_label.set_text(_("Игра не запущена"))
             self.stop_button.set_visible(False)
             self.status_bar.set_visible(True)
+            self.status_separator.set_visible(True)
 
     def start_process_checking(self) -> None:
         """Start periodic checking of running processes"""
