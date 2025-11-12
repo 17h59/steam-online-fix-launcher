@@ -97,6 +97,12 @@ class OnlineFixGameData(GameData):
         # Determine environment
         in_flatpak = os.path.exists("/.flatpak-info")
         host_home = SteamLauncher.get_host_home(in_flatpak)
+        steam_home = SteamLauncher.resolve_steam_home(host_home, in_flatpak)
+
+        if not SteamLauncher.check_steam_installed(steam_home, in_flatpak):
+            self.log_and_toast(_("Steam installation not found"))
+            self._show_steam_not_installed_dialog(steam_home)
+            return
 
         # Check if Steam is running
         if not SteamLauncher.check_steam_running(in_flatpak):
@@ -105,7 +111,6 @@ class OnlineFixGameData(GameData):
 
         # Get Proton settings
         proton_version = shared.schema.get_string("online-fix-proton-version")
-        steam_home = os.path.join(host_home, ".local/share/Steam")
 
         # If no Proton version is selected, try to use the first available one
         if not proton_version:
@@ -135,19 +140,16 @@ class OnlineFixGameData(GameData):
         user_home = host_home if in_flatpak else os.path.expanduser("~")
 
         # Prepare environment variables
-        env = SteamLauncher.prepare_environment(prefix_path, user_home)
+        env = SteamLauncher.prepare_environment(prefix_path, user_home, steam_home)
 
-        # Find Steam Runtime if enabled
+        # Find Steam Runtime if enabled (check default location only)
         steam_runtime_path = None
         if shared.schema.get_boolean("online-fix-use-steam-runtime"):
-            steam_runtime_path = SteamLauncher.find_steam_runtime(steam_home, in_flatpak)
-            if not steam_runtime_path:
-                # Check default location
-                default_runtime = os.path.join(steam_home, "ubuntu12_32", "steam-runtime", "run.sh")
-                if SteamLauncher._check_file_exists(default_runtime, in_flatpak):
-                    steam_runtime_path = default_runtime
-                else:
-                    logging.info("[SOFL] Steam Runtime not found")
+            default_runtime = os.path.join(steam_home, "ubuntu12_32", "steam-runtime", "run.sh")
+            if SteamLauncher._check_file_exists(default_runtime, in_flatpak):
+                steam_runtime_path = default_runtime
+            else:
+                logging.info("[SOFL] Steam Runtime not found")
 
         # Build launch command
         args_before = shared.schema.get_string("online-fix-args-before")
@@ -326,14 +328,55 @@ class OnlineFixGameData(GameData):
     def _on_proton_manager_dialog_response(self, dialog: Adw.MessageDialog, response: str) -> None:
         """Handle Proton Manager dialog response"""
         if response == "open_proton_manager":
-            # Open preferences dialog on Proton Manager page
-            if hasattr(shared.win, 'preferences') and shared.win.preferences:
-                shared.win.preferences.set_visible_page(shared.win.preferences.proton_page)
-                shared.win.preferences.present()
-            else:
-                # Create new preferences dialog if it doesn't exist
-                from sofl.preferences import SOFLPreferences
-                prefs = SOFLPreferences()
-                prefs.set_visible_page(prefs.proton_page)
-                prefs.present(shared.win)  # Pass parent window to make it a dialog
-                shared.win.preferences = prefs
+            self._open_preferences_page("proton_page")
+
+    def _show_steam_not_installed_dialog(self, steam_home: str) -> None:
+        """Show dialog when Steam installation cannot be found"""
+        dialog = Adw.MessageDialog()
+        dialog.set_transient_for(shared.win)
+        dialog.set_heading(_("Steam installation not found"))
+
+        if steam_home:
+            body_path = steam_home
+        else:
+            body_path = _("the default location")
+
+        dialog.set_body(
+            _("Steam could not be located at {}. Install Steam or set the correct folder in preferences.").format(body_path)
+        )
+
+        dialog.add_response("cancel", _("Cancel"))
+        dialog.add_response("open_preferences", _("Open Preferences"))
+        dialog.set_default_response("open_preferences")
+        dialog.set_response_appearance("open_preferences", Adw.ResponseAppearance.SUGGESTED)
+        dialog.connect("response", lambda _d, r: self._on_steam_not_installed_dialog_response(r))
+        dialog.present()
+
+    def _on_steam_not_installed_dialog_response(self, response: str) -> None:
+        """Handle Steam not installed dialog response"""
+        if response == "open_preferences":
+            self._open_preferences_page("online_fix_page", "online_fix_steam_home_entry_row")
+
+    def _open_preferences_page(self, page_attr: str, focus_attr: Optional[str] = None) -> None:
+        """Open preferences dialog on a specific page and optionally focus a widget"""
+        prefs = getattr(shared.win, "preferences", None)
+
+        if prefs:
+            page = getattr(prefs, page_attr, None)
+            if page is not None:
+                prefs.set_visible_page(page)
+            prefs.present()
+        else:
+            from sofl.preferences import SOFLPreferences
+
+            prefs = SOFLPreferences()
+            page = getattr(prefs, page_attr, None)
+            if page is not None:
+                prefs.set_visible_page(page)
+            prefs.present(shared.win)
+            shared.win.preferences = prefs
+
+        if focus_attr and hasattr(shared.win.preferences, focus_attr):
+            focus_widget = getattr(shared.win.preferences, focus_attr)
+            if focus_widget and hasattr(focus_widget, "grab_focus"):
+                focus_widget.grab_focus()

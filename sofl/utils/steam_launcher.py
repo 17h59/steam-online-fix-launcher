@@ -21,10 +21,8 @@ import os
 import subprocess
 import logging
 import shlex
-import vdf
-from io import StringIO
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from sofl import shared
 
@@ -38,13 +36,13 @@ class SteamLauncher:
         try:
             if in_flatpak:
                 result = subprocess.run(
-                    ["flatpak-spawn", "--host", "pidof", "steam"],
+                    ["flatpak-spawn", "--host", "pgrep", "-x", "steam"],
                     capture_output=True,
                     text=True,
                 )
             else:
                 result = subprocess.run(
-                    ["pidof", "steam"], capture_output=True, text=True
+                    ["pgrep", "-x", "steam"], capture_output=True, text=True
                 )
             return result.returncode == 0 and bool(result.stdout.strip())
         except Exception as e:
@@ -71,6 +69,27 @@ class SteamLauncher:
         return os.path.expanduser("~")
 
     @staticmethod
+    def resolve_steam_home(host_home: str, in_flatpak: bool = False) -> str:
+        """Resolve Steam installation path, honoring user overrides."""
+        try:
+            custom_path = shared.schema.get_string("online-fix-steam-home").strip()
+        except Exception:
+            custom_path = ""
+
+        if custom_path:
+            expanded = os.path.expanduser(custom_path)
+            if not os.path.isabs(expanded):
+                base_home = host_home or os.path.expanduser("~")
+                expanded = os.path.abspath(os.path.join(base_home, expanded))
+            return expanded
+
+        if host_home:
+            return os.path.join(host_home, ".local/share/Steam")
+
+        # Fallback to effective home directory in the current environment
+        return os.path.join(os.path.expanduser("~"), ".local/share/Steam")
+
+    @staticmethod
     def check_proton_exists(proton_version: str, steam_home: str, in_flatpak: bool = False) -> bool:
         """Checks Proton version existence"""
         proton_path = os.path.join(
@@ -78,59 +97,27 @@ class SteamLauncher:
         )
 
         try:
-            if in_flatpak:
-                result = subprocess.run(
-                    ["flatpak-spawn", "--host", "test", "-e", proton_path],
-                    capture_output=True,
-                )
-                return result.returncode == 0
-            else:
-                return os.path.exists(proton_path)
+            return SteamLauncher._check_path_exists(proton_path, in_flatpak)
         except Exception:
             return False
 
     @staticmethod
-    def find_steam_runtime(steam_home: str, in_flatpak: bool = False) -> Optional[str]:
-        """Finds Steam Runtime in Steam libraries"""
-        library_folders_path = os.path.join(
-            steam_home, ".steam/steam/steamapps/libraryfolders.vdf"
-        )
+    def _check_path_exists(path: str, in_flatpak: bool = False) -> bool:
+        """Checks path existence (file or directory)."""
+        if not path:
+            return False
 
         try:
-            library_data = None
             if in_flatpak:
-                try:
-                    result = subprocess.run(
-                        ["flatpak-spawn", "--host", "cat", library_folders_path],
-                        capture_output=True,
-                        text=True,
-                    )
-                    if result.returncode == 0:
-                        try:
-                            library_data = vdf.loads(result.stdout)
-                        except Exception:
-                            library_data = vdf.load(StringIO(result.stdout))
-                except Exception as e:
-                    logging.debug(f"[SOFL] Could not read host libraryfolders.vdf: {e}")
-            else:
-                if os.path.exists(library_folders_path):
-                    with open(library_folders_path, "r") as f:
-                        library_data = vdf.load(f)
+                result = subprocess.run(
+                    ["flatpak-spawn", "--host", "test", "-e", path],
+                    capture_output=True,
+                )
+                return result.returncode == 0
 
-            # Look for SteamLinuxRuntime_sniper
-            if library_data and "libraryfolders" in library_data:
-                for folder_data in library_data["libraryfolders"].values():
-                    if "apps" in folder_data and "1628350" in folder_data["apps"]:
-                        runtime_path = os.path.join(
-                            folder_data["path"],
-                            "steamapps/common/SteamLinuxRuntime_sniper/run",
-                        )
-                        if SteamLauncher._check_file_exists(runtime_path, in_flatpak):
-                            return runtime_path
-        except Exception as e:
-            logging.error(f"[SOFL] Error finding Steam Runtime: {str(e)}")
-
-        return None
+            return os.path.exists(path)
+        except Exception:
+            return False
 
     @staticmethod
     def _check_file_exists(file_path: str, in_flatpak: bool = False) -> bool:
@@ -148,24 +135,47 @@ class SteamLauncher:
             return False
 
     @staticmethod
-    def prepare_environment(prefix_path: str, user_home: str) -> Dict[str, str]:
+    def check_steam_installed(steam_home: str, in_flatpak: bool = False) -> bool:
+        """Check whether Steam appears to be installed at the given location."""
+        if not SteamLauncher._check_path_exists(steam_home, in_flatpak):
+            return False
+
+        candidate_paths = [
+            os.path.join(steam_home, "steam.sh"),
+            os.path.join(steam_home, "steam"),
+            os.path.join(steam_home, "ubuntu12_32", "steam"),
+            os.path.join(steam_home, "steamapps"),
+        ]
+
+        for candidate in candidate_paths:
+            if SteamLauncher._check_path_exists(candidate, in_flatpak):
+                return True
+
+        return False
+
+    @staticmethod
+    def prepare_environment(prefix_path: str, user_home: str, steam_home: str) -> Dict[str, str]:
         """Prepares environment variables for launch"""
         dll_overrides = shared.schema.get_string("online-fix-dll-overrides")
         debug_mode = shared.schema.get_boolean("online-fix-debug-mode")
+
+        default_library_path = os.path.join(user_home, ".local/share/Steam")
+        library_path = steam_home or default_library_path
+        client_path = steam_home or os.path.join(user_home, ".steam/steam")
 
         # Base environment variables
         env = {
             "WINEDLLOVERRIDES": f"d3d11=n;d3d10=n;d3d10core=n;dxgi=n;openvr_api_dxvk=n;d3d12=n;d3d12core=n;d3d9=n;d3d8=n;{dll_overrides}",
             "WINEDEBUG": "+warn,+err,+trace" if debug_mode else "-all",
             "STEAM_COMPAT_DATA_PATH": prefix_path,
-            "STEAM_COMPAT_CLIENT_INSTALL_PATH": f"{user_home}/.steam/steam",
+            "STEAM_COMPAT_CLIENT_INSTALL_PATH": client_path,
         }
 
         # Add Steam Overlay if enabled
         use_steam_overlay = shared.schema.get_boolean("online-fix-use-steam-overlay")
         if use_steam_overlay:
             existing_preload = env.get("LD_PRELOAD", "")
-            new_preload_paths = f"{user_home}/.local/share/Steam/ubuntu12_32/gameoverlayrenderer.so:{user_home}/.local/share/Steam/ubuntu12_64/gameoverlayrenderer.so"
+            new_preload_paths = f"{library_path}/ubuntu12_32/gameoverlayrenderer.so:{library_path}/ubuntu12_64/gameoverlayrenderer.so"
 
             preload_parts = [part for part in [existing_preload, new_preload_paths] if part]
             env["LD_PRELOAD"] = ":".join(preload_parts)

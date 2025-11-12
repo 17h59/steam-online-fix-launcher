@@ -56,6 +56,7 @@ class SOFLPreferences(Adw.PreferencesDialog):
     general_page: Adw.PreferencesPage = Gtk.Template.Child()
     import_page: Adw.PreferencesPage = Gtk.Template.Child()
     proton_page: Adw.PreferencesPage = Gtk.Template.Child()
+    online_fix_page: Adw.PreferencesPage = Gtk.Template.Child()
     sgdb_page: Adw.PreferencesPage = Gtk.Template.Child()
 
     sources_group: Adw.PreferencesGroup = Gtk.Template.Child()
@@ -127,6 +128,8 @@ class SOFLPreferences(Adw.PreferencesDialog):
     # Online-Fix
     online_fix_entry_row: Adw.EntryRow = Gtk.Template.Child()
     online_fix_file_chooser_button: Gtk.Button = Gtk.Template.Child()
+    online_fix_steam_home_entry_row: Adw.EntryRow = Gtk.Template.Child()
+    online_fix_steam_home_button: Gtk.Button = Gtk.Template.Child()
 
     online_fix_auto_patch_switch: Adw.SwitchRow = Gtk.Template.Child()
     online_fix_dll_override_entry: Adw.EntryRow = Gtk.Template.Child()
@@ -555,6 +558,27 @@ class SOFLPreferences(Adw.PreferencesDialog):
             "clicked", self.online_fix_path_browse_handler
         )
 
+        # Steam installation directory overrides
+        default_steam_home = str(Path.home() / ".local/share/Steam")
+        try:
+            steam_home_override = shared.schema.get_string("online-fix-steam-home").strip()
+        except GLib.Error:
+            steam_home_override = ""
+            shared.schema.set_string("online-fix-steam-home", steam_home_override)
+
+        self.online_fix_steam_home_entry_row.set_text(steam_home_override)
+        if hasattr(self.online_fix_steam_home_entry_row, "set_placeholder_text"):
+            self.online_fix_steam_home_entry_row.set_placeholder_text(default_steam_home)
+        if hasattr(self.online_fix_steam_home_entry_row, "set_subtitle"):
+            self.online_fix_steam_home_entry_row.set_subtitle(_("Path to your Steam installation directory"))
+
+        self.online_fix_steam_home_entry_row.connect(
+            "changed", self.on_steam_home_changed
+        )
+        self.online_fix_steam_home_button.connect(
+            "clicked", self.online_fix_steam_home_browse_handler
+        )
+
         # Get available Proton versions
         proton_versions = self.get_proton_versions()
 
@@ -708,6 +732,23 @@ class SOFLPreferences(Adw.PreferencesDialog):
                 logging.debug("Error selecting folder for Online-Fix: %s", e)
 
         self.file_chooser.select_folder(shared.win, None, set_online_fix_dir)
+
+    def on_steam_home_changed(self, entry: Adw.EntryRow) -> None:
+        """Handler for Steam home override change"""
+        shared.schema.set_string("online-fix-steam-home", entry.get_text().strip())
+
+    def online_fix_steam_home_browse_handler(self, *_args) -> None:
+        """Choose directory for Steam installation override"""
+
+        def set_steam_home_dir(_widget: Any, result: Gio.Task) -> None:
+            try:
+                path = Path(self.file_chooser.select_folder_finish(result).get_path())
+                shared.schema.set_string("online-fix-steam-home", str(path))
+                self.online_fix_steam_home_entry_row.set_text(str(path))
+            except GLib.Error as e:
+                logging.debug("Error selecting Steam folder: %s", e)
+
+        self.file_chooser.select_folder(shared.win, None, set_steam_home_dir)
 
     def setup_proton_manager(self) -> None:
         """Setup Proton Manager functionality"""

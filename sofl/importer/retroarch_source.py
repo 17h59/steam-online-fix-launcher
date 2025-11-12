@@ -107,6 +107,7 @@ class RetroarchSourceIterable(SourceIterable):
                     ),
                     "added": shared.import_time,
                 }
+
                 game = GameFactory.create_game(values)
 
                 # Get boxart
@@ -157,14 +158,6 @@ class RetroarchSource(Source):
                     / "retroarch",
                     shared.config_dir / "retroarch",
                     shared.host_config_dir / "retroarch",
-                    # TODO: Windows support, waiting for executable path setting improvement
-                    # Path("C:\\RetroArch-Win64"),
-                    # Path("C:\\RetroArch-Win32"),
-                    # TODO: UWP support (URL handler - https://github.com/libretro/RetroArch/pull/13563)
-                    # shared.local_appdata_dir
-                    # / "Packages"
-                    # / "1e4cf179-f3c2-404f-b9f3-cb2070a5aad8_8ngdn9a6dx1ma"
-                    # / "LocalState",
                 ],
                 paths={
                     "retroarch.cfg": LocationSubPath("retroarch.cfg"),

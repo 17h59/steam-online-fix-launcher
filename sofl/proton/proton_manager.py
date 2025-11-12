@@ -30,6 +30,7 @@ from urllib.request import urlopen, urlretrieve
 from urllib.error import URLError
 
 from sofl import shared
+from sofl.utils.steam_launcher import SteamLauncher
 
 
 class ProtonManager:
@@ -40,39 +41,58 @@ class ProtonManager:
     
     def __init__(self):
         self._cached_available_versions: Optional[List[Dict[str, Any]]] = None
+
+    def _get_resolved_steam_home(self) -> Path:
+        """Resolve the Steam installation directory, honoring user overrides."""
+        in_flatpak = os.path.exists("/.flatpak-info")
+        host_home = SteamLauncher.get_host_home(in_flatpak)
+        resolved = SteamLauncher.resolve_steam_home(host_home, in_flatpak)
+        return Path(resolved)
     
     def get_steam_compat_path(self) -> Path:
         """Get the correct path to compatibilitytools.d directory"""
+        try:
+            override = shared.schema.get_string("online-fix-steam-home").strip()
+        except Exception:
+            override = ""
+
+        resolved_home = self._get_resolved_steam_home()
+        compat_path = resolved_home / "compatibilitytools.d"
+
+        if override:
+            return compat_path
+
+        if compat_path.exists():
+            return compat_path
+
         in_flatpak = os.path.exists("/.flatpak-info")
-        
-        if in_flatpak:
-            # In flatpak, try to get host home directory
-            try:
-                result = subprocess.run(
-                    ["flatpak-spawn", "--host", "printenv", "HOME"],
-                    capture_output=True,
-                    text=True,
-                )
-                if result.returncode == 0:
-                    host_home = result.stdout.strip()
-                    return Path(host_home) / ".local/share/Steam/compatibilitytools.d"
-            except Exception as e:
-                logging.error(f"[ProtonManager] Failed to get host home: {e}")
-        
-        # Fallback to standard paths
-        home = Path.home()
-        steam_paths = [
-            home / ".local/share/Steam/compatibilitytools.d",
-            home / ".steam/root/compatibilitytools.d",
-            home / ".steam/steam/compatibilitytools.d"
-        ]
-        
-        for path in steam_paths:
+        host_home = SteamLauncher.get_host_home(in_flatpak)
+
+        candidates: List[Path] = []
+        if host_home:
+            host_base = Path(host_home)
+            candidates.extend(
+                [
+                    host_base / ".local/share/Steam/compatibilitytools.d",
+                    host_base / ".steam/root/compatibilitytools.d",
+                    host_base / ".steam/steam/compatibilitytools.d",
+                ]
+            )
+
+        sandbox_home = Path.home()
+        candidates.extend(
+            [
+                sandbox_home / ".local/share/Steam/compatibilitytools.d",
+                sandbox_home / ".steam/root/compatibilitytools.d",
+                sandbox_home / ".steam/steam/compatibilitytools.d",
+            ]
+        )
+
+        for path in candidates:
             if path.exists():
                 return path
-        
-        # Return the most common path if none exist
-        return steam_paths[0]
+
+        return compat_path
     
     def get_installed_versions(self) -> List[str]:
         """Get list of installed Proton versions"""
@@ -83,6 +103,8 @@ class ProtonManager:
             self.get_steam_compat_path(),  # User path
             Path("/usr/share/steam/compatibilitytools.d")  # System path
         ]
+
+        resolved_home = self._get_resolved_steam_home()
 
         for compat_path in compat_paths:
             if compat_path.exists():
@@ -100,13 +122,17 @@ class ProtonManager:
                     logging.error(f"[ProtonManager] Error reading {compat_path}: {e}")
         
         # Also check Steam's common directory for standard Proton
-        home = Path.home()
-        steam_common_paths = [
-            home / ".local/share/Steam/steamapps/common",
-            home / ".steam/steam/steamapps/common"
+        steam_common_candidates = [
+            resolved_home / "steamapps/common",
+            Path.home() / ".local/share/Steam/steamapps/common",
+            Path.home() / ".steam/steam/steamapps/common",
         ]
-        
-        for common_path in steam_common_paths:
+
+        seen_common_paths: set[Path] = set()
+        for common_path in steam_common_candidates:
+            if common_path in seen_common_paths:
+                continue
+            seen_common_paths.add(common_path)
             if common_path.exists():
                 try:
                     for item in common_path.iterdir():
@@ -214,13 +240,18 @@ class ProtonManager:
                 return True
 
             # If not found in compatibilitytools.d, try steamapps/common (official versions)
-            home = Path.home()
-            steam_common_paths = [
-                home / ".local/share/Steam/steamapps/common",
-                home / ".steam/steam/steamapps/common"
+            resolved_home = self._get_resolved_steam_home()
+            steam_common_candidates = [
+                resolved_home / "steamapps/common",
+                Path.home() / ".local/share/Steam/steamapps/common",
+                Path.home() / ".steam/steam/steamapps/common",
             ]
 
-            for common_path in steam_common_paths:
+            seen_common_paths: set[Path] = set()
+            for common_path in steam_common_candidates:
+                if common_path in seen_common_paths:
+                    continue
+                seen_common_paths.add(common_path)
                 if common_path.exists():
                     version_path = common_path / version
                     if version_path.exists():
@@ -254,13 +285,18 @@ class ProtonManager:
                 return proton_path
 
         # If not found in compatibilitytools.d, try steamapps/common (official versions)
-        home = Path.home()
-        steam_common_paths = [
-            home / ".local/share/Steam/steamapps/common",
-            home / ".steam/steam/steamapps/common"
+        resolved_home = self._get_resolved_steam_home()
+        steam_common_candidates = [
+            resolved_home / "steamapps/common",
+            Path.home() / ".local/share/Steam/steamapps/common",
+            Path.home() / ".steam/steam/steamapps/common",
         ]
 
-        for common_path in steam_common_paths:
+        seen_common_paths: set[Path] = set()
+        for common_path in steam_common_candidates:
+            if common_path in seen_common_paths:
+                continue
+            seen_common_paths.add(common_path)
             if common_path.exists():
                 proton_path = common_path / version / "proton"
                 if proton_path.exists() and proton_path.is_file():

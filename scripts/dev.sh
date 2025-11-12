@@ -25,7 +25,7 @@ Commands:
   setup       Configure Meson in builddir with local prefix
   build       Build via Meson
   install     Install into .local prefix
-  deps        Create .venv and install Python runtime deps (requests, pillow, rarfile, vdf)
+  deps        Create .venv and install Python runtime deps (requests, pillow, rarfile)
   smart       Automatically handle setup+build+install+run with smart checks (recommended)
   rebuild-run Remove builddir, then setup+build+install+run (fast clean+run)
   run         Run app with correct env vars (auto-setup/build/install if needed)
@@ -161,7 +161,7 @@ do_deps() {
     # shellcheck disable=SC1091
     source "$PROJECT_DIR/.venv/bin/activate"
     python -m pip install -U pip setuptools wheel
-    python -m pip install requests pillow rarfile vdf
+    python -m pip install requests pillow rarfile
 }
 
 export_env() {

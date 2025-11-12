@@ -460,6 +460,21 @@ template $SOFLPreferences: Adw.PreferencesDialog {
         tooltip-text: _("Version of Proton to use with launcher");
       }
 
+      Adw.EntryRow online_fix_steam_home_entry_row {
+        title: _("Steam folder");
+
+        [suffix]
+        Button online_fix_steam_home_button {
+          valign: center;
+          icon-name: "folder-symbolic";
+          tooltip-text: _("Select Folder");
+
+          styles [
+            "flat",
+          ]
+        }
+      }
+
       Adw.SwitchRow online_fix_auto_patch_switch {
         title: _("Auto Apply Patches");
         subtitle: _("Automatically apply required patches for games");

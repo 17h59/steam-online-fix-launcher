@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from gettext import gettext as _
+
 from gi.repository import Adw, Gio
 
 from sofl import shared
@@ -28,6 +30,26 @@ class OnlineFixSectionMixin:
         self.online_fix_entry_row.connect("changed", self._online_fix_path_changed)
         self.online_fix_file_chooser_button.connect(
             "clicked", self.online_fix_path_browse_handler
+        )
+
+        default_steam_home = str(Path.home() / ".local/share/Steam")
+        try:
+            steam_home_override = shared.schema.get_string("online-fix-steam-home").strip()
+        except GLib.Error:
+            steam_home_override = ""
+            shared.schema.set_string("online-fix-steam-home", steam_home_override)
+
+        self.online_fix_steam_home_entry_row.set_text(steam_home_override)
+        if hasattr(self.online_fix_steam_home_entry_row, "set_placeholder_text"):
+            self.online_fix_steam_home_entry_row.set_placeholder_text(default_steam_home)
+        if hasattr(self.online_fix_steam_home_entry_row, "set_subtitle"):
+            self.online_fix_steam_home_entry_row.set_subtitle(_("Path to your Steam installation directory"))
+
+        self.online_fix_steam_home_entry_row.connect(
+            "changed", self.on_steam_home_changed
+        )
+        self.online_fix_steam_home_button.connect(
+            "clicked", self.online_fix_steam_home_browse_handler
         )
 
         self.setup_proton_combo(
@@ -99,5 +121,24 @@ class OnlineFixSectionMixin:
                 )
 
         self.file_chooser.select_folder(shared.win, None, set_online_fix_dir)
+
+    def on_steam_home_changed(self, entry: Adw.EntryRow) -> None:
+        shared.schema.set_string("online-fix-steam-home", entry.get_text().strip())
+
+    def online_fix_steam_home_browse_handler(self, *_args: Any) -> None:
+        from pathlib import Path
+        from gi.repository import GLib
+
+        def set_steam_home_dir(_widget: Any, result: Gio.Task) -> None:
+            try:
+                path = Path(self.file_chooser.select_folder_finish(result).get_path())
+                shared.schema.set_string("online-fix-steam-home", str(path))
+                self.online_fix_steam_home_entry_row.set_text(str(path))
+            except GLib.Error as error:
+                import logging
+
+                logging.debug("Error selecting folder for Steam: %s", error)
+
+        self.file_chooser.select_folder(shared.win, None, set_steam_home_dir)
 
 
