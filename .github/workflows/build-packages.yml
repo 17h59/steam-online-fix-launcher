@@ -84,18 +84,13 @@ jobs:
             fi
           fi
 
-          # Build release body into a temporary file using real newlines,
-          # then write it once to the GitHub Actions output to avoid
-          # literal "\n" sequences appearing in the final release body.
           TMP_RELEASE=$(mktemp)
-          # Ensure cleanup on exit
           trap 'rm -f "$TMP_RELEASE"' EXIT
 
           case "$SOURCE" in
             "changelog")
               if [ -f "CHANGELOG.md" ]; then
                 printf '%s\n\n' "## Changes" >> "$TMP_RELEASE"
-                # Extract latest version section from CHANGELOG.md
                 awk '
                   /^## \[v.*\]/ { if (++count > 1) exit; next }
                   count == 1 && /^###/ { in_section = 1 }
@@ -111,10 +106,7 @@ jobs:
 
           if [ "$SOURCE" = "git_commits" ]; then
             printf '%s\n\n' "## Changes" >> "$TMP_RELEASE"
-
-            # Get previous tag
             PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
-
             if [ -n "$PREVIOUS_TAG" ]; then
               printf '%s\n' "### New Features" >> "$TMP_RELEASE"
               git log --pretty=format:"%s" --grep="^feat:" --grep="^add:" --grep="^new:" $PREVIOUS_TAG..HEAD | sed 's/^/- /' >> "$TMP_RELEASE"
@@ -134,13 +126,11 @@ jobs:
             fi
           fi
 
-          # Add package information
           printf '%s\n' "### Package Downloads" >> "$TMP_RELEASE"
           printf '%s\n' "- **Flatpak**: `org.badkiko.sofl.flatpak`" >> "$TMP_RELEASE"
           printf '%s\n' "- **Debian/Ubuntu**: `sofl_${{ needs.get-version.outputs.version }}_all.deb`" >> "$TMP_RELEASE"
           printf '%s\n' "- **Arch Linux**: `sofl-${{ needs.get-version.outputs.version }}-1-x86_64.pkg.tar.zst`" >> "$TMP_RELEASE"
 
-          # Installation instructions block
           cat >> "$TMP_RELEASE" <<'EOT'
           ### Installation Instructions
 
@@ -160,7 +150,6 @@ jobs:
           ```
           EOT
 
-          # Single redirection: write the multi-line output safely
           {
             printf '%s\n' "release_body<<EOF"
             cat "$TMP_RELEASE"
@@ -191,8 +180,7 @@ jobs:
           flatpak install --user --noninteractive flathub org.gnome.Sdk//48
 
       - name: Update version
-        run: |
-          ./scripts/update_version.sh ${{ needs.get-version.outputs.version }}
+        run: ./scripts/update_version.sh ${{ needs.get-version.outputs.version }}
 
       - name: Build Flatpak
         env:
@@ -236,7 +224,7 @@ jobs:
           name: sofl-deb-${{ needs.get-version.outputs.version }}
           path: dist/sofl_${{ needs.get-version.outputs.version }}_all.deb
 
-    build-arch:
+  build-arch:
     needs: [get-version, generate-release-body]
     runs-on: ubuntu-latest
     container:
@@ -262,12 +250,9 @@ jobs:
       - name: Build Arch package
         run: |
           mkdir -p dist
-          # создаём доступную директорию для makepkg
           export BUILDDIR="$PWD/.build"
           mkdir -p "$BUILDDIR"
           chmod 777 "$BUILDDIR"
-
-          # запускаем сборку
           ./packaging/arch/build.sh ${{ needs.get-version.outputs.version }} dist
 
       - name: Upload Arch artifacts
@@ -277,7 +262,6 @@ jobs:
           path: |
             dist/*.pkg.tar.zst
             dist/*.tar.gz
-
 
   release:
     needs: [get-version, generate-release-body, build-flatpak, build-deb, build-arch]
