@@ -5,6 +5,11 @@
 
 set -e
 
+export BUILDDIR="${BUILDDIR:-$PWD/.build}"
+mkdir -p "$BUILDDIR"
+chmod 777 "$BUILDDIR"
+
+
 VERSION=${1:-"0.0.3"}
 PACKAGE_NAME="sofl"
 OUTPUT_DIR=${2:-"../../dist"}
