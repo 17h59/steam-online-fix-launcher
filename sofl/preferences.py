@@ -19,14 +19,15 @@
 
 
 import logging
+import os
 import re
+import subprocess
 import threading
+from gettext import gettext as _
 from pathlib import Path
 from shutil import rmtree
 from sys import platform
 from typing import Any, Callable, Optional
-import os
-import subprocess
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
@@ -130,6 +131,13 @@ class SOFLPreferences(Adw.PreferencesDialog):
     online_fix_file_chooser_button: Gtk.Button = Gtk.Template.Child()
     online_fix_steam_home_entry_row: Adw.EntryRow = Gtk.Template.Child()
     online_fix_steam_home_button: Gtk.Button = Gtk.Template.Child()
+    online_fix_prefix_entry_row: Adw.EntryRow = Gtk.Template.Child()
+    online_fix_prefix_button: Gtk.Button = Gtk.Template.Child()
+    online_fix_dependencies_expander: Adw.ExpanderRow = Gtk.Template.Child()
+    online_fix_dep_vcredist_x64_row: Adw.ActionRow = Gtk.Template.Child()
+    online_fix_dep_vcredist_x64_switch: Gtk.Switch = Gtk.Template.Child()
+    online_fix_dep_vcredist_x86_row: Adw.ActionRow = Gtk.Template.Child()
+    online_fix_dep_vcredist_x86_switch: Gtk.Switch = Gtk.Template.Child()
 
     online_fix_auto_patch_switch: Adw.SwitchRow = Gtk.Template.Child()
     online_fix_dll_override_entry: Adw.EntryRow = Gtk.Template.Child()
@@ -579,6 +587,29 @@ class SOFLPreferences(Adw.PreferencesDialog):
             "clicked", self.online_fix_steam_home_browse_handler
         )
 
+        # Shared Wine prefix configuration
+        default_prefix_path = self._get_default_prefix_path()
+        try:
+            prefix_override = shared.schema.get_string("online-fix-prefix-path").strip()
+        except GLib.Error:
+            prefix_override = ""
+            shared.schema.set_string("online-fix-prefix-path", prefix_override)
+
+        self.online_fix_prefix_entry_row.set_text(prefix_override)
+        if hasattr(self.online_fix_prefix_entry_row, "set_placeholder_text"):
+            self.online_fix_prefix_entry_row.set_placeholder_text(default_prefix_path)
+        if hasattr(self.online_fix_prefix_entry_row, "set_subtitle"):
+            self.online_fix_prefix_entry_row.set_subtitle(_("Single Wine prefix used for all Online-Fix games"))
+
+        self.online_fix_prefix_entry_row.connect(
+            "changed", self.on_prefix_path_changed
+        )
+        self.online_fix_prefix_button.connect(
+            "clicked", self.online_fix_prefix_browse_handler
+        )
+
+        self._setup_dependency_switches()
+
         # Get available Proton versions
         proton_versions = self.get_proton_versions()
 
@@ -749,6 +780,78 @@ class SOFLPreferences(Adw.PreferencesDialog):
                 logging.debug("Error selecting Steam folder: %s", e)
 
         self.file_chooser.select_folder(shared.win, None, set_steam_home_dir)
+
+    def on_prefix_path_changed(self, entry: Adw.EntryRow) -> None:
+        """Handler for shared Wine prefix override change"""
+        shared.schema.set_string("online-fix-prefix-path", entry.get_text().strip())
+
+    def online_fix_prefix_browse_handler(self, *_args) -> None:
+        """Choose directory for shared Wine prefix"""
+
+        def set_prefix_dir(_widget: Any, result: Gio.Task) -> None:
+            try:
+                path = Path(self.file_chooser.select_folder_finish(result).get_path())
+                shared.schema.set_string("online-fix-prefix-path", str(path))
+                self.online_fix_prefix_entry_row.set_text(str(path))
+            except GLib.Error as e:
+                logging.debug("Error selecting folder for Wine prefix: %s", e)
+
+        self.file_chooser.select_folder(shared.win, None, set_prefix_dir)
+
+    def _get_default_prefix_path(self) -> str:
+        """Compute default shared Wine prefix path."""
+        in_flatpak = os.path.exists("/.flatpak-info")
+        if in_flatpak:
+            return str(
+                Path(shared.home)
+                / ".var"
+                / "app"
+                / "org.badkiko.sofl"
+                / "data"
+                / "wine-prefixes"
+                / "onlinefix"
+            )
+
+        return str(Path.home() / ".local/share/OnlineFix/prefix")
+
+    def _setup_dependency_switches(self) -> None:
+        """Configure dependency switches for Online-Fix prefix."""
+        dependency_switches: dict[str, Gtk.Switch] = {
+            "vcredist_x64": self.online_fix_dep_vcredist_x64_switch,
+            "vcredist_x86": self.online_fix_dep_vcredist_x86_switch,
+        }
+
+        try:
+            enabled_deps = set(shared.schema.get_strv("online-fix-dependencies"))
+        except GLib.Error:
+            enabled_deps = set()
+
+        for dep_id, switch in dependency_switches.items():
+            switch.set_active(dep_id in enabled_deps)
+
+        for dep_id, switch in dependency_switches.items():
+            switch.connect(
+                "notify::active",
+                lambda sw, _param, dep=dep_id: self.on_dependency_switch_toggled(
+                    dep, sw.get_active()
+                ),
+            )
+
+    def on_dependency_switch_toggled(self, dep_id: str, enabled: bool) -> None:
+        """Update dependency list when the user toggles a switch."""
+        try:
+            dependencies = set(shared.schema.get_strv("online-fix-dependencies"))
+        except GLib.Error:
+            dependencies = set()
+
+        if enabled:
+            dependencies.add(dep_id)
+        else:
+            dependencies.discard(dep_id)
+
+        shared.schema.set_strv(
+            "online-fix-dependencies", sorted(dependencies)
+        )
 
     def setup_proton_manager(self) -> None:
         """Setup Proton Manager functionality"""

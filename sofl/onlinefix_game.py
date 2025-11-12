@@ -32,6 +32,7 @@ from sofl.proton.proton_manager import ProtonManager
 from sofl.utils.create_dialog import create_dialog
 from sofl.utils.path_utils import normalize_executable_path
 from sofl.utils.steam_launcher import SteamLauncher
+from sofl.utils.dependency_installer import DependencyInstaller
 
 from gettext import gettext as _
 
@@ -52,17 +53,22 @@ class OnlineFixGameData(GameData):
         Returns:
             str: Path to created prefix
         """
-        # In Flatpak, we can't create prefix next to the game executable
-        # because the game path might be read-only. Use a writable location instead.
         in_flatpak = os.path.exists("/.flatpak-info")
-        if in_flatpak:
-            # Use Flatpak data directory for Wine prefixes
-            import hashlib
-            game_path_hash = hashlib.md5(str(game_exec).encode()).hexdigest()[:8]
-            prefix_path = os.path.join(shared.home, ".var", "app", "org.badkiko.sofl", "data", "wine-prefixes", game_path_hash)
+
+        # Determine desired prefix path
+        try:
+            configured_path = shared.schema.get_string("online-fix-prefix-path").strip()
+        except Exception:
+            configured_path = ""
+
+        base_home = shared.home if in_flatpak else os.path.expanduser("~")
+
+        if configured_path:
+            prefix_path = os.path.expanduser(configured_path)
+            if not os.path.isabs(prefix_path):
+                prefix_path = os.path.abspath(os.path.join(base_home, configured_path))
         else:
-            # Use the traditional approach for native installations
-            prefix_path = os.path.join(game_exec.parent, "OFME Prefix")
+            prefix_path = self._get_default_prefix_path(in_flatpak)
 
         os.makedirs(prefix_path, exist_ok=True)
 
@@ -74,6 +80,62 @@ class OnlineFixGameData(GameData):
             os.makedirs(os.path.join(pfx_user_path, dir_name), exist_ok=True)
 
         return prefix_path
+
+    def _get_default_prefix_path(self, in_flatpak: bool) -> str:
+        """Default shared Wine prefix path."""
+        if in_flatpak:
+            return os.path.join(
+                shared.home,
+                ".var",
+                "app",
+                "org.badkiko.sofl",
+                "data",
+                "wine-prefixes",
+                "onlinefix",
+            )
+
+        return os.path.join(os.path.expanduser("~"), ".local/share/OnlineFix/prefix")
+
+    def _install_required_dependencies(
+        self,
+        prefix_path: str,
+        proton_path: str,
+        user_home: str,
+        steam_home: str,
+        in_flatpak: bool,
+    ) -> None:
+        """Install configured dependencies into the Wine prefix."""
+        dependency_ids: list[str] = []
+        try:
+            if hasattr(shared.schema, "get_strv"):
+                dependency_ids = list(shared.schema.get_strv("online-fix-dependencies"))
+        except Exception as exc:  # pylint: disable=broad-except
+            logging.error("[SOFL] Failed to read dependency list: %s", exc)
+            dependency_ids = []
+
+        dependency_ids = [dep_id for dep_id in dependency_ids if dep_id]
+        if not dependency_ids:
+            return
+
+        installer = DependencyInstaller(
+            prefix_path,
+            proton_path,
+            steam_home,
+            user_home,
+            in_flatpak,
+        )
+
+        installed, failed = installer.install_selected(dependency_ids)
+
+        if installed:
+            logging.info("[SOFL] Installed dependencies: %s", ", ".join(installed))
+
+        if failed:
+            self.log_and_toast(
+                _("Failed to install some dependencies: {}").format(
+                    ", ".join(failed)
+                )
+            )
 
     def launch(self) -> None:
         """Launches game with Online-Fix"""
@@ -134,10 +196,20 @@ class OnlineFixGameData(GameData):
         if not proton_path:
             self.log_and_toast(_("Failed to find Proton executable for version {}").format(proton_version))
             return
+        proton_path_str = str(proton_path)
 
         # Create Wine prefix
         prefix_path = self._create_wine_prefix(game_exec)
         user_home = host_home if in_flatpak else os.path.expanduser("~")
+
+        # Install required dependencies into the prefix if needed
+        self._install_required_dependencies(
+            prefix_path,
+            proton_path_str,
+            user_home,
+            steam_home,
+            in_flatpak,
+        )
 
         # Prepare environment variables
         env = SteamLauncher.prepare_environment(prefix_path, user_home, steam_home)
@@ -156,7 +228,7 @@ class OnlineFixGameData(GameData):
         args_after = shared.schema.get_string("online-fix-args-after")
 
         cmd_argv = SteamLauncher.build_launch_command(
-            proton_path,
+            proton_path_str,
             str(game_exec),
             steam_runtime_path,
             args_before,

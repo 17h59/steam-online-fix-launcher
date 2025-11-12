@@ -34,6 +34,12 @@ class MockSettings:
     def get_int(self, key):
         return 0
 
+    def get_strv(self, key):
+        return []
+
+    def set_strv(self, key, value):
+        return None
+
 
 schema = MockSettings(APP_ID)
 state_schema = MockSettings(APP_ID + ".State")

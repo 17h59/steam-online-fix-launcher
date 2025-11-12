@@ -449,6 +449,21 @@ template $SOFLPreferences: Adw.PreferencesDialog {
           ]
         }
       }
+
+      Adw.EntryRow online_fix_prefix_entry_row {
+        title: _("Wine prefix path");
+
+        [suffix]
+        Button online_fix_prefix_button {
+          valign: center;
+          icon-name: "folder-symbolic";
+          tooltip-text: _("Select Folder");
+
+          styles [
+            "flat",
+          ]
+        }
+      }
     }
 
     Adw.PreferencesGroup online_fix_launcher_group {
@@ -472,6 +487,32 @@ template $SOFLPreferences: Adw.PreferencesDialog {
           styles [
             "flat",
           ]
+        }
+      }
+
+      Adw.ExpanderRow online_fix_dependencies_expander {
+        title: _("Dependencies");
+        subtitle: _("Select redistributables to install into the shared prefix");
+        show-enable-switch: false;
+
+        Adw.ActionRow online_fix_dep_vcredist_x64_row {
+          title: _("Visual C++ 2015-2022 (x64)");
+          subtitle: _("Installs vc_redist.x64.exe once per prefix");
+
+          [suffix]
+          Gtk.Switch online_fix_dep_vcredist_x64_switch {
+            valign: center;
+          }
+        }
+
+        Adw.ActionRow online_fix_dep_vcredist_x86_row {
+          title: _("Visual C++ 2015-2022 (x86)");
+          subtitle: _("Installs vc_redist.x86.exe (needed for some 32-bit components)");
+
+          [suffix]
+          Gtk.Switch online_fix_dep_vcredist_x86_switch {
+            valign: center;
+          }
         }
       }
 

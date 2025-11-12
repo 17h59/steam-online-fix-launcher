@@ -131,6 +131,18 @@
       <description>Override the path to the Steam installation used for Online-Fix games. Leave empty to use the default location.</description>
     </key>
 
+    <key name="online-fix-prefix-path" type="s">
+      <default>""</default>
+      <summary>Shared Wine prefix path</summary>
+      <description>Override the Wine prefix location used for Online-Fix games. Leave empty to use the default shared prefix.</description>
+    </key>
+
+    <key name="online-fix-dependencies" type="as">
+      <default>["vcredist_x64", "vcredist_x86"]</default>
+      <summary>Additional Windows dependencies</summary>
+      <description>List of Windows redistributables or installers that should be applied to the shared Wine prefix.</description>
+    </key>
+
     <key name="online-fix-proton-version" type="s">
       <default>"GE-Proton9-26"</default>
       <summary>Proton version for Steam launcher</summary>
