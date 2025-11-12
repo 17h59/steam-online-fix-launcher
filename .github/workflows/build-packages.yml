@@ -250,9 +250,9 @@ jobs:
           useradd -m ciuser
           mkdir -p dist .build
           chown -R ciuser:ciuser $GITHUB_WORKSPACE dist .build
-
-    # Запускаем сборку от ciuser с сохранением окружения и рабочей директории
-    sudo -E -u ciuser bash -c "cd $GITHUB_WORKSPACE && ./packaging/arch/build.sh ${{ needs.get-version.outputs.version }} dist"
+      
+          # Запускаем сборку от ciuser с сохранением окружения и рабочей директории
+          sudo -E -u ciuser bash -c "cd $GITHUB_WORKSPACE && ./packaging/arch/build.sh ${{ needs.get-version.outputs.version }} dist"
 
       - name: Upload Arch artifacts
         uses: actions/upload-artifact@v4
