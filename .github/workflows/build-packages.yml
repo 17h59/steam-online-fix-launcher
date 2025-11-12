@@ -225,43 +225,57 @@ jobs:
           path: dist/sofl_${{ needs.get-version.outputs.version }}_all.deb
 
   build-arch:
-    needs: [get-version, generate-release-body]
-    runs-on: ubuntu-latest
-    container:
-      image: archlinux:latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+  needs: [get-version, generate-release-body]
+  runs-on: ubuntu-latest
+  container:
+    image: archlinux:latest
+  steps:
+    # 1) Сначала подготовим окружение (включая git) — важно сделать это до checkout
+    - name: Prepare build environment (install git & deps)
+      run: |
+        pacman-key --init
+        pacman-key --populate archlinux
+        pacman -Syu --noconfirm
+        pacman -S --noconfirm --needed \
+          git base-devel meson ninja python python-gobject gtk4 libadwaita \
+          python-requests python-pillow python-cairo python-psutil python-pyxdg \
+          gobject-introspection blueprint-compiler gettext python-rarfile \
+          python-setuptools python-pip fakeroot
 
-      - name: Prepare build environment
-        run: |
-          pacman-key --init
-          pacman-key --populate archlinux
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm --needed \
-            git base-devel meson ninja python python-gobject gtk4 libadwaita \
-            python-requests python-pillow python-cairo python-psutil python-pyxdg \
-            gobject-introspection blueprint-compiler gettext python-rarfile \
-            python-setuptools python-pip fakeroot
+    # 2) Теперь checkout — с полной историей, чтобы .git точно был
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
-      - name: Build Arch package
-        run: |
-          useradd -m ciuser
-          mkdir -p dist .build
-          chown -R ciuser:ciuser $GITHUB_WORKSPACE dist .build
+    # 3) Подготовка пользователя и прав, подготовка dist
+    - name: Prepare non-root user and workspace
+      run: |
+        useradd -m ciuser
+        mkdir -p dist .build
+        # оставляем временно файлы под root, но даём ciuser доступ к рабочей директории и dist
+        chown -R ciuser:ciuser "$GITHUB_WORKSPACE" dist .build
+        # debug
+        echo "Workspace: $GITHUB_WORKSPACE"
+        ls -la "$GITHUB_WORKSPACE" | sed -n '1,120p'
+        echo ".git exists?"; [ -d "$GITHUB_WORKSPACE/.git" ] && echo "yes" || echo "NO"
 
-          echo "ls -la $GITHUB_WORKSPACE/.git || true"
-          ls -la "$GITHUB_WORKSPACE/.git" || true
+    # 4) Запуск сборки: git/archive и подготовка PKGBUILD внутри build.sh должны работать
+    #    Мы запускаем скрипт от ciuser, сохраняя окружение и подставляя HOME
+    - name: Build Arch package (as ciuser)
+      env:
+        VERSION: ${{ needs.get-version.outputs.version }}
+      run: |
+        # запускаем как ciuser, сохраняем env и HOME, работаем из $GITHUB_WORKSPACE
+        sudo -E -u ciuser env HOME="$GITHUB_WORKSPACE" bash -lc "cd \"$GITHUB_WORKSPACE\" && ./packaging/arch/build.sh $VERSION dist"
 
-          sudo -E -u ciuser env HOME="$GITHUB_WORKSPACE" bash -lc "cd \"$GITHUB_WORKSPACE\" && ./packaging/arch/build.sh ${{ needs.get-version.outputs.version }} dist"
-
-      - name: Upload Arch artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: sofl-arch-${{ needs.get-version.outputs.version }}
-          path: |
-            dist/*.pkg.tar.zst
-            dist/*.tar.gz
+    - name: Upload Arch artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: sofl-arch-${{ needs.get-version.outputs.version }}
+        path: |
+          dist/*.pkg.tar.zst
+          dist/*.tar.gz
 
   release:
     needs: [get-version, generate-release-body, build-flatpak, build-deb, build-arch]
