@@ -230,6 +230,9 @@ jobs:
     container:
       image: archlinux:latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Prepare build environment
         run: |
           pacman-key --init
@@ -241,17 +244,17 @@ jobs:
             gobject-introspection blueprint-compiler gettext python-rarfile \
             python-setuptools python-pip fakeroot
 
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Update version
-        run: ./scripts/update_version.sh ${{ needs.get-version.outputs.version }}
+      - name: Create non-root user for makepkg
+        run: |
+          useradd -m ciuser
+          mkdir -p dist
+          mkdir -p .build
+          chown -R ciuser:ciuser dist .build
 
       - name: Build Arch package
         run: |
-          mkdir -p dist
-          ./packaging/arch/build.sh ${{ needs.get-version.outputs.version }} dist
-          
+          runuser -u ciuser -- ./packaging/arch/build.sh ${{ needs.get-version.outputs.version }} dist
+
       - name: Upload Arch artifacts
         uses: actions/upload-artifact@v4
         with:
