@@ -250,11 +250,8 @@ jobs:
       - name: Build Arch package
         run: |
           mkdir -p dist
-          export BUILDDIR="$PWD/.build"
-          mkdir -p "$BUILDDIR"
-          chmod 777 "$BUILDDIR"
           ./packaging/arch/build.sh ${{ needs.get-version.outputs.version }} dist
-
+          
       - name: Upload Arch artifacts
         uses: actions/upload-artifact@v4
         with:
