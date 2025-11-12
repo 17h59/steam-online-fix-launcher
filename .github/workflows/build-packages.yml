@@ -244,16 +244,17 @@ jobs:
             gobject-introspection blueprint-compiler gettext python-rarfile \
             python-setuptools python-pip fakeroot
 
-      - name: Fix permissions for ciuser
-        run: |
-          chown -R ciuser:ciuser $GITHUB_WORKSPACE
-
       - name: Create non-root user for makepkg
         run: |
           useradd -m ciuser
           mkdir -p dist
           mkdir -p .build
           chown -R ciuser:ciuser dist .build
+
+      - name: Fix permissions for ciuser
+        run: |
+          chown -R ciuser:ciuser $GITHUB_WORKSPACE
+
 
       - name: Build Arch package
         run: |
