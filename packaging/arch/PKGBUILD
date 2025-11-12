@@ -30,6 +30,8 @@ makedepends=(
     'ninja'
     'git'
 )
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
 optdepends=(
     'steam: For Steam game integration'
     'lutris: For Lutris game integration'

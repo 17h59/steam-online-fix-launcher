@@ -137,6 +137,8 @@ jobs:
           # Add package information
           printf '%s\n' "### Package Downloads" >> "$TMP_RELEASE"
           printf '%s\n' "- **Flatpak**: `org.badkiko.sofl.flatpak`" >> "$TMP_RELEASE"
+          printf '%s\n' "- **Debian/Ubuntu**: `sofl_${{ needs.get-version.outputs.version }}_all.deb`" >> "$TMP_RELEASE"
+          printf '%s\n' "- **Arch Linux**: `sofl-${{ needs.get-version.outputs.version }}-1-x86_64.pkg.tar.zst`" >> "$TMP_RELEASE"
 
           # Installation instructions block
           cat >> "$TMP_RELEASE" <<'EOT'
@@ -145,6 +147,16 @@ jobs:
           **Flatpak:**
           ```bash
           flatpak install --user org.badkiko.sofl.flatpak
+          ```
+
+          **Debian/Ubuntu (.deb):**
+          ```bash
+          sudo apt install ./sofl_<version>_all.deb
+          ```
+
+          **Arch Linux (.pkg.tar.zst):**
+          ```bash
+          sudo pacman -U sofl-<version>-1-x86_64.pkg.tar.zst
           ```
           EOT
 
@@ -196,84 +208,68 @@ jobs:
           name: sofl-flatpak-${{ needs.get-version.outputs.version }}
           path: dist/org.badkiko.sofl.flatpak
 
-  # build-deb:
-  #   needs: [get-version, generate-release-body]
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
-  #
-  #     - name: Install dependencies
-  #       run: |
-  #         sudo apt update
-  #         sudo apt install -y meson ninja-build python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 python3-requests python3-pillow python3-cairo python3-psutil python3-xdg dpkg-dev libgtk-4-dev libadwaita-1-dev blueprint-compiler gettext desktop-file-utils
-  #
-  #     - name: Update version
-  #       run: |
-  #         ./scripts/update_version.sh ${{ needs.get-version.outputs.version }}
-  #
-  #     - name: Build Debian package
-  #       run: |
-  #         mkdir -p "$GITHUB_WORKSPACE/dist"
-  #         ./packaging/debian/build.sh ${{ needs.get-version.outputs.version }} "$GITHUB_WORKSPACE/dist"
-  #
-  #     - name: Upload Debian artifact
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: sofl-deb-${{ needs.get-version.outputs.version }}
-  #         path: ${{ github.workspace }}/dist/sofl_${{ needs.get-version.outputs.version }}_all.deb
+  build-deb:
+    needs: [get-version, generate-release-body]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  # build-arch:
-  #   needs: [get-version, generate-release-body]
-  #   runs-on: ubuntu-latest
-  #   container:
-  #     image: archlinux:latest
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
-  #
-  #     - name: Create builder user for makepkg
-  #       run: |
-  #         # Create builder user since makepkg doesn't like running as root
-  #         if ! id -u builder &>/dev/null; then
-  #             useradd -m -s /bin/bash builder
-  #             # Give builder user access to project directory
-  #             mkdir -p ${{ github.workspace }}
-  #             chown -R builder:builder ${{ github.workspace }} || echo "Warning: Could not change ownership, continuing anyway..."
-  #         fi
-  #
-  #     - name: Update system and install dependencies (root)
-  #       run: |
-  #         pacman -Sy --noconfirm
-  #         pacman -S --noconfirm --needed base-devel git meson ninja python python-gobject gtk4 libadwaita python-requests python-pillow python-cairo python-psutil python-pyxdg gobject-introspection blueprint-compiler gettext python-rarfile python-setuptools python-pip
-  #
-  #     - name: Update version (root)
-  #       run: |
-  #         ./scripts/update_version.sh ${{ needs.get-version.outputs.version }}
-  #
-  #     - name: Restore ownership to builder after version update
-  #       run: |
-  #         chown -R builder:builder ${{ github.workspace }} || echo "Warning: Could not change ownership, continuing anyway..."
-  #
-  #     - name: Fix git safe directory as builder
-  #       run: |
-  #         runuser -u builder -- bash -c "git config --global --add safe.directory ${{ github.workspace }}"
-  #
-  #     - name: Build Arch Linux package as builder
-  #       run: |
-  #         mkdir -p dist
-  #         chown builder:builder dist || echo "Warning: Could not change ownership of dist, continuing anyway..."
-  #         runuser -u builder -- bash -c "cd packaging/arch && ./build.sh ${{ needs.get-version.outputs.version }} dist"
-  #
-  #     - name: Upload Arch package artifacts
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: sofl-arch-${{ needs.get-version.outputs.version }}
-  #         path: |
-  #           dist/*.pkg.tar.zst
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y meson ninja-build python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 python3-requests python3-pillow python3-cairo python3-psutil python3-xdg dpkg-dev libgtk-4-dev libadwaita-1-dev blueprint-compiler gettext desktop-file-utils lintian
+
+      - name: Update version
+        run: ./scripts/update_version.sh ${{ needs.get-version.outputs.version }}
+
+      - name: Build Debian package
+        env:
+          SKIP_DEP_INSTALL: "1"
+        run: |
+          mkdir -p dist
+          ./packaging/debian/build.sh ${{ needs.get-version.outputs.version }} dist
+
+      - name: Upload Debian artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sofl-deb-${{ needs.get-version.outputs.version }}
+          path: dist/sofl_${{ needs.get-version.outputs.version }}_all.deb
+
+  build-arch:
+    needs: [get-version, generate-release-body]
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Prepare build environment
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed git base-devel meson ninja python python-gobject gtk4 libadwaita python-requests python-pillow python-cairo python-psutil python-pyxdg gobject-introspection blueprint-compiler gettext python-rarfile python-setuptools python-pip fakeroot
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update version
+        run: ./scripts/update_version.sh ${{ needs.get-version.outputs.version }}
+
+      - name: Build Arch package
+        run: |
+          mkdir -p dist
+          ./packaging/arch/build.sh ${{ needs.get-version.outputs.version }} dist
+
+      - name: Upload Arch artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sofl-arch-${{ needs.get-version.outputs.version }}
+          path: |
+            dist/*.pkg.tar.zst
+            dist/*.tar.gz
 
   release:
-    needs: [get-version, generate-release-body, build-flatpak]
+    needs: [get-version, generate-release-body, build-flatpak, build-deb, build-arch]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     steps:
@@ -291,7 +287,7 @@ jobs:
           body: ${{ needs.generate-release-body.outputs.release_body }}
           files: |
             sofl-flatpak-${{ needs.get-version.outputs.version }}/org.badkiko.sofl.flatpak
-        #            # sofl-deb-${{ needs.get-version.outputs.version }}/sofl_${{ needs.get-version.outputs.version }}_all.deb
-        #            # sofl-arch-${{ needs.get-version.outputs.version }}/*.pkg.tar.zst
+            sofl-deb-${{ needs.get-version.outputs.version }}/sofl_${{ needs.get-version.outputs.version }}_all.deb
+            sofl-arch-${{ needs.get-version.outputs.version }}/*.pkg.tar.zst
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

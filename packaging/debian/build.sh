@@ -14,25 +14,29 @@ OUTPUT_DIR=${2:-"dist"}
 
 echo "Building Debian package for $PACKAGE_NAME version $VERSION..."
 
-# Install required dependencies
-echo "Installing required dependencies..."
-sudo apt update
+# Optionally skip dependency installation (useful for CI where deps are pre-installed)
+if [ "${SKIP_DEP_INSTALL:-0}" != "1" ] && [ "${CI:-}" != "true" ]; then
+    echo "Installing required dependencies..."
+    sudo apt update
 
-# Check and install required tools
-REQUIRED_TOOLS="dpkg-deb meson ninja"
-for tool in $REQUIRED_TOOLS; do
-    if ! command -v $tool &> /dev/null; then
-        echo "Installing $tool..."
-        pkg="$tool"
-        [ "$tool" = "ninja" ] && pkg="ninja-build"
-        sudo apt install -y "$pkg"
-    fi
-done
+    # Check and install required tools
+    REQUIRED_TOOLS="dpkg-deb meson ninja"
+    for tool in $REQUIRED_TOOLS; do
+        if ! command -v "$tool" &> /dev/null; then
+            echo "Installing $tool..."
+            pkg="$tool"
+            [ "$tool" = "ninja" ] && pkg="ninja-build"
+            sudo apt install -y "$pkg"
+        fi
+    done
 
-# Install build dependencies
-BUILD_DEPS="python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 python3-requests python3-pillow python3-cairo python3-psutil python3-xdg libgtk-4-dev libadwaita-1-dev"
-echo "Installing build dependencies..."
-sudo apt install -y $BUILD_DEPS
+    # Install build dependencies
+    BUILD_DEPS="python3-gi python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 python3-requests python3-pillow python3-cairo python3-psutil python3-xdg libgtk-4-dev libadwaita-1-dev"
+    echo "Installing build dependencies..."
+    sudo apt install -y $BUILD_DEPS
+else
+    echo "Skipping dependency installation (CI environment or SKIP_DEP_INSTALL=1)."
+fi
 
 # Get project root directory (parent of packaging directory)
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -43,29 +47,38 @@ if [[ "$OUTPUT_DIR" != /* ]]; then
 fi
 OUTPUT_DIR="$(mkdir -p "$OUTPUT_DIR" && cd "$OUTPUT_DIR" && pwd)"
 
-rm -rf "${PROJECT_ROOT:?}/${BUILD_DIR:?}"
+DESTDIR_PATH="$PROJECT_ROOT/$BUILD_DIR"
+
+rm -rf "${DESTDIR_PATH:?}"
 rm -f "${OUTPUT_DIR:?}"/*.deb
 
 # Build the application using meson
 echo "Building application with Meson..."
 cd "$PROJECT_ROOT"
 
-# Create build directory if it doesn't exist
-mkdir -p build-dir
-
+rm -rf build-dir
 meson setup build-dir --prefix=/usr --buildtype=release -Dprofile=release -Dtiff_compression=webp
 meson compile -C build-dir
-meson install --destdir="$BUILD_DIR" -C build-dir
+meson install --destdir="$DESTDIR_PATH" -C build-dir
+
+# Ensure desktop file exists (fallback for environments where i18n merge fails)
+DESKTOP_TARGET="$DESTDIR_PATH/usr/share/applications/org.badkiko.sofl.desktop"
+if [ ! -f "$DESKTOP_TARGET" ]; then
+    echo "Desktop entry missing after install; generating fallback copy..."
+    DESKTOP_SOURCE="$PROJECT_ROOT/data/org.badkiko.sofl.desktop.in"
+    install -Dm644 "$DESKTOP_SOURCE" "$DESKTOP_TARGET"
+    sed -i "s/@APP_ID@/org.badkiko.sofl/g" "$DESKTOP_TARGET"
+fi
 
 # Copy debian control files
-mkdir -p "$BUILD_DIR/DEBIAN"
-cp "$DEBIAN_DIR/DEBIAN/control" "$BUILD_DIR/DEBIAN/"
+mkdir -p "$DESTDIR_PATH/DEBIAN"
+cp "$DEBIAN_DIR/DEBIAN/control" "$DESTDIR_PATH/DEBIAN/"
 
 # Update version in control file
-sed -i "s/Version: .*/Version: $VERSION/" "$BUILD_DIR/DEBIAN/control"
+sed -i "s/Version: .*/Version: $VERSION/" "$DESTDIR_PATH/DEBIAN/control"
 
 # Create postinst script for desktop database update
-cat > "$BUILD_DIR/DEBIAN/postinst" << 'EOF'
+cat > "$DESTDIR_PATH/DEBIAN/postinst" << 'EOF'
 #!/bin/bash
 set -e
 
@@ -83,10 +96,10 @@ fi
 exit 0
 EOF
 
-chmod 755 "$BUILD_DIR/DEBIAN/postinst"
+chmod 755 "$DESTDIR_PATH/DEBIAN/postinst"
 
 # Create prerm script for cleanup
-cat > "$BUILD_DIR/DEBIAN/prerm" << 'EOF'
+cat > "$DESTDIR_PATH/DEBIAN/prerm" << 'EOF'
 #!/bin/bash
 set -e
 
@@ -101,11 +114,16 @@ fi
 exit 0
 EOF
 
-chmod 755 "$BUILD_DIR/DEBIAN/prerm"
+chmod 755 "$DESTDIR_PATH/DEBIAN/prerm"
 
 # Build the package
 echo "Building Debian package..."
-dpkg-deb --build "$BUILD_DIR" "${PACKAGE_NAME}_${VERSION}_all.deb"
+if command -v fakeroot &> /dev/null; then
+    fakeroot dpkg-deb --build "$DESTDIR_PATH" "${PACKAGE_NAME}_${VERSION}_all.deb"
+else
+    echo "Warning: fakeroot not found, building package without owner normalization."
+    dpkg-deb --build "$DESTDIR_PATH" "${PACKAGE_NAME}_${VERSION}_all.deb"
+fi
 
 echo "Debian package created: $(pwd)/${PACKAGE_NAME}_${VERSION}_all.deb"
 
