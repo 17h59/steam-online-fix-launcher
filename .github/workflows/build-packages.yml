@@ -236,47 +236,47 @@ jobs:
           name: sofl-deb-${{ needs.get-version.outputs.version }}
           path: dist/sofl_${{ needs.get-version.outputs.version }}_all.deb
 
-  build-arch:
-  needs: [get-version, generate-release-body]
-  runs-on: ubuntu-latest
-  container:
-    image: archlinux:latest
-  steps:
-    - name: Prepare build environment
-      run: |
-        pacman-key --init
-        pacman-key --populate archlinux
-        pacman -Syu --noconfirm
-        pacman -S --noconfirm --needed \
-          git base-devel meson ninja python python-gobject gtk4 libadwaita \
-          python-requests python-pillow python-cairo python-psutil python-pyxdg \
-          gobject-introspection blueprint-compiler gettext python-rarfile \
-          python-setuptools python-pip fakeroot
+    build-arch:
+    needs: [get-version, generate-release-body]
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Prepare build environment
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed \
+            git base-devel meson ninja python python-gobject gtk4 libadwaita \
+            python-requests python-pillow python-cairo python-psutil python-pyxdg \
+            gobject-introspection blueprint-compiler gettext python-rarfile \
+            python-setuptools python-pip fakeroot
 
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Update version
-      run: ./scripts/update_version.sh ${{ needs.get-version.outputs.version }}
+      - name: Update version
+        run: ./scripts/update_version.sh ${{ needs.get-version.outputs.version }}
 
-    - name: Build Arch package
-      run: |
-        mkdir -p dist
-        # создаём доступную директорию для makepkg
-        export BUILDDIR="$PWD/.build"
-        mkdir -p "$BUILDDIR"
-        chmod 777 "$BUILDDIR"
+      - name: Build Arch package
+        run: |
+          mkdir -p dist
+          # создаём доступную директорию для makepkg
+          export BUILDDIR="$PWD/.build"
+          mkdir -p "$BUILDDIR"
+          chmod 777 "$BUILDDIR"
 
-        # запускаем сборку
-        ./packaging/arch/build.sh ${{ needs.get-version.outputs.version }} dist
+          # запускаем сборку
+          ./packaging/arch/build.sh ${{ needs.get-version.outputs.version }} dist
 
-    - name: Upload Arch artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: sofl-arch-${{ needs.get-version.outputs.version }}
-        path: |
-          dist/*.pkg.tar.zst
-          dist/*.tar.gz
+      - name: Upload Arch artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sofl-arch-${{ needs.get-version.outputs.version }}
+          path: |
+            dist/*.pkg.tar.zst
+            dist/*.tar.gz
 
 
   release:
