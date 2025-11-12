@@ -1,5 +1,15 @@
 # SOFL Changelog
 
+## [v0.0.3.5a] - 2025-11-12
+
+### New Features
+
+* **Steam Path Configuration** — Added an option to specify the Steam executable path.
+* **Prefix Path Setting** — Introduced a new option to define the prefix directory path.
+* **VS Redist C++ Dependency** — Added support for the Visual C++ Redistributable package in prefix.
+* **New Package Variants** — Expanded packaging support to include native Debian/Ubuntu and Arch Linux packages.
+
+
 ## [v0.0.3.4a] - 2025-10-23
 
 ### New Features
