@@ -244,21 +244,15 @@ jobs:
             gobject-introspection blueprint-compiler gettext python-rarfile \
             python-setuptools python-pip fakeroot
 
-      - name: Create non-root user for makepkg
-        run: |
-          useradd -m ciuser
-          mkdir -p dist
-          mkdir -p .build
-          chown -R ciuser:ciuser dist .build
-
-      - name: Fix permissions for ciuser
-        run: |
-          chown -R ciuser:ciuser $GITHUB_WORKSPACE
-
-
       - name: Build Arch package
         run: |
-          runuser -u ciuser -- bash -c "cd $GITHUB_WORKSPACE && ./packaging/arch/build.sh ${{ needs.get-version.outputs.version }} dist"
+          # Создаём ciuser и директории
+          useradd -m ciuser
+          mkdir -p dist .build
+          chown -R ciuser:ciuser $GITHUB_WORKSPACE dist .build
+
+    # Запускаем сборку от ciuser с сохранением окружения и рабочей директории
+    sudo -E -u ciuser bash -c "cd $GITHUB_WORKSPACE && ./packaging/arch/build.sh ${{ needs.get-version.outputs.version }} dist"
 
       - name: Upload Arch artifacts
         uses: actions/upload-artifact@v4
