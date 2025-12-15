@@ -362,6 +362,7 @@ class SOFLApplication(Adw.Application):
 
     def on_import_action(self, *_args: Any) -> None:
         shared.importer = Importer()
+        shared.importer.add_source(OnlineFixSource())
 
         if shared.schema.get_boolean("lutris"):
             shared.importer.add_source(LutrisSource())
